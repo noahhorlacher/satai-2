@@ -1,5 +1,6 @@
 <script setup>
 import JSZip from 'jszip'
+import pako from 'pako'
 
 const loading = ref(false)
 
@@ -10,15 +11,17 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 
 statusMessage.value = 'Press a button to begin...'
 
+const dataPreprocessorBatchSize = 1000
+
 // load midi data
 // my midi files were already pre-processed to only have 1 track (track 0)
-const midiFiles = ref([])
+let midiFiles = []
 const dataLoaded = ref(false)
 async function loadData() {
     loading.value = true
     cancelAction.value = false
 
-    midiFiles.value = []
+    midiFiles = []
 
     try {
         statusMessage.value = 'Downloading midi files ZIP...'
@@ -42,11 +45,11 @@ async function loadData() {
 
             if (filename.endsWith('.midi') || filename.endsWith('.mid')) {
                 const midiFile = await file.async("arraybuffer")
-                midiFiles.value.push(midiFile)
+                midiFiles.push(midiFile)
             }
         }
 
-        statusMessage.value = cancelAction.value ? `Loading Canceled` : `Loaded ${midiFiles.value.length} MIDI files.`
+        statusMessage.value = cancelAction.value ? `Loading Canceled` : `Loaded ${midiFiles.length} MIDI files.`
         dataLoaded.value = !cancelAction.value
     } catch (err) {
         console.error('Error loading midi files:', err)
@@ -61,19 +64,40 @@ const preprocessedData = ref()
 const dataPreprocessed = ref(false)
 async function preprocessData() {
     loading.value = true
-    preprocessedData.value = await MIDIPreprocessor.preprocess(midiFiles.value)
 
-    if(preprocessedData.value.length === 0) {
-        statusMessage.value = 'No valid data found'
-        loading.value = false
-        return
+    let batchNumber = 1
+    for(let i = 0; i < midiFiles.length; i+=dataPreprocessorBatchSize) {
+        const batch = midiFiles.slice(i, i+dataPreprocessorBatchSize)
+        const _preprocessedData = await MIDIPreprocessor.preprocess(batch, undefined, `${batchNumber} of ${Math.ceil(midiFiles.length/dataPreprocessorBatchSize)}`)
+
+        exportTrainingData(_preprocessedData, `${batchNumber}-of-${Math.ceil(midiFiles.length/dataPreprocessorBatchSize)}`)
+
+        batchNumber++
     }
-    trainingData.value = preprocessedData.value
 
-    statusMessage.value = `Created ${preprocessedData.value.length} data objects.`
+    statusMessage.value = 'Preprocessing complete.'
 
     loading.value = false
-    dataPreprocessed.value = true
+}
+
+function exportTrainingData(dataToExport, batchProgress) {
+    statusMessage.value = `downloading training data part ${batchProgress}...`
+
+    if(!dataToExport || dataToExport.length === 0) {
+        return
+    }
+
+    const data = JSON.stringify(dataToExport)
+    const compressedData = pako.deflate(data)
+
+    const blob = new Blob([compressedData], { type: 'application/gzip' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `training-data-part-${batchProgress}.json.gz`
+    a.click()
+    URL.revokeObjectURL(url)
+    a.remove()
 }
 
 // initialize GAN model
@@ -100,7 +124,7 @@ function initializeModel() {
             <h3 class="text-sm">Status</h3>
             <el-button link bg size="small" @click="cancelAction = true" :disabled="!loading">Cancel Action</el-button>
         </div>
-            <div class="text-md bg-gray-200 py-2 px-4 mb-2 font-mono whitespace-pre-line">{{ statusMessage }}</div>
+            <div class="text-md rounded-md bg-gray-200 py-2 px-4 mb-2 font-mono whitespace-pre-line">{{ statusMessage }}</div>
 
         <h3 class="text-sm mt-6 mb-2">Actions</h3>
         <el-button @click="loadData" :disabled="loading">Load Data</el-button>

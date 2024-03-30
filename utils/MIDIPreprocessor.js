@@ -15,18 +15,18 @@ export default class MIDIPreprocessor {
         dimensions: 64,
         startOctave: 3,
         horizontalResolution: 1 / 8,
-        stepSizeX: 1,
-        transpositions: [+7, -7],
-    }) {
+        stepSizeX: 2,
+        transpositions: [+7],
+    }, batchProgress) {
         const { statusMessage } = toRefs(useStatusMessageStore())
 
         let allProcessedMidiMatrices = []
 
         for (let index = 0; index < midiFiles.length; index++) {
-            statusMessage.value = `Processing MIDI file ${index + 1}/${midiFiles.length}...`
-            await new Promise(resolve => setTimeout(resolve, 0))
+            statusMessage.value = `Processing batch ${batchProgress}, file ${index + 1}/${midiFiles.length}...`
 
             const midiArrayBuffer = midiFiles[index]
+
             const processedMidiMatrices = await MIDIPreprocessor.processSingleMidi(midiArrayBuffer, options)
             if (processedMidiMatrices) {
                 allProcessedMidiMatrices = allProcessedMidiMatrices.concat(processedMidiMatrices)
@@ -36,11 +36,7 @@ export default class MIDIPreprocessor {
         // delete all matrices that are just 0
         let finalMidiMatrices = []
 
-        statusMessage.value = `Filtering out empty matrices...`
-
         for (let [index, matrix] of allProcessedMidiMatrices.entries()) {
-            statusMessage.value = `Filtering out empty matrices ${index + 1}/${allProcessedMidiMatrices.length}...`
-            await new Promise(resolve => setTimeout(resolve, 0))
             if (matrix.some(row => row.some(val => val !== 0))) {
                 finalMidiMatrices.push(matrix)
             }
@@ -56,14 +52,15 @@ export default class MIDIPreprocessor {
         const stepSizeX = options.stepSizeX;
         const transpositions = options.transpositions;
 
-        let processedMidiMatrices = [];
+        let processedMidiMatrices = []
 
         try {
-            const midiBlobUri = URL.createObjectURL(new Blob([midiArrayBuffer], { type: 'audio/midi' }));
-            const midiData = await Midi.fromUrl(midiBlobUri);
+            const midiBlobUri = URL.createObjectURL(new Blob([midiArrayBuffer], { type: 'audio/midi' }))
+            const midiData = await Midi.fromUrl(midiBlobUri)
 
             // filter out non-chromatic instruments
-            midiData.tracks = midiData.tracks.filter(track => chromaticInstruments.includes(track.instrument.number))
+            midiData.tracks = midiData.tracks.filter(track => chromaticInstruments.includes(track.instrument.number + 1))
+
 
             // select the track with the most notes
             let maxNotes = 0;
@@ -109,7 +106,7 @@ export default class MIDIPreprocessor {
             console.error(e)
         }
 
-        return processedMidiMatrices;
+        return processedMidiMatrices
     }
 
 
