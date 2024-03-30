@@ -3,17 +3,51 @@ import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue'
 
 const menu = {
     "Export": [
-        { label: 'as MIDI', icon: 'mdi:export-variant' },
-        { label: 'as WAV', icon: 'mdi:export-variant' },
+        { label: 'as MIDI', icon: 'mdi:export-variant', action: exportAsMIDI },
+        { label: 'as WAV', icon: 'mdi:export-variant', exportAsWAV },
+        { label: 'Training Data', icon: 'mdi:export-variant', action: exportTrainingData },
     ],
     "Misc.": [
         { label: 'About', icon: 'ri:information-2-line' },
     ]
 }
 
+const { trainingData } = toRefs(useTrainingDataStore())
+
+function exportAsMIDI() {
+    console.log('Exporting as MIDI...')
+}
+
+function exportAsWAV() {
+    console.log('Exporting as WAV...')
+}
+
+function exportTrainingData() {
+    console.log('Exporting training data...')
+    console.log('Training data:', trainingData.value)
+    
+    if(!trainingData.value || trainingData.value.length === 0) {
+        console.error('No training data found')
+        return
+    }
+
+    const data = JSON.stringify(trainingData.value)
+    const blob = new Blob([data], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'training-data.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    a.remove()
+}
+
 function NavMenuItem(props, context) {
     return <MenuItem>
-        <el-button text>
+        <el-button onClick={() => {
+            if(!props.item.action) return
+            props.item.action()
+        }} text>
             <icon class="mr-2" name={props.item.icon} size="1.5em" />
             { props.item.label }
         </el-button>
