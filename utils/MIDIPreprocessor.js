@@ -15,15 +15,15 @@ export default class MIDIPreprocessor {
         dimensions: 64,
         startOctave: 3,
         horizontalResolution: 1 / 8,
-        stepSizeX: 2,
-        transpositions: [+7],
+        stepSizeX: 1,
+        transpositions: [-5, +7],
     }, batchProgress) {
         const { statusMessage } = toRefs(useStatusMessageStore())
 
         let allProcessedMidiMatrices = []
 
         for (let index = 0; index < midiFiles.length; index++) {
-            statusMessage.value = `Processing batch ${batchProgress}, file ${index + 1}/${midiFiles.length}...`
+            statusMessage.value = `Processing batch ${batchProgress}\nFile ${index + 1}/${midiFiles.length}...`
 
             const midiArrayBuffer = midiFiles[index]
 
@@ -33,7 +33,7 @@ export default class MIDIPreprocessor {
             }
         }
 
-        // delete all matrices that are just 0
+        // delete all matrices that are just zeros
         let finalMidiMatrices = []
 
         for (let [index, matrix] of allProcessedMidiMatrices.entries()) {
