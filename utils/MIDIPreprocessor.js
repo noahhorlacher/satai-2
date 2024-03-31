@@ -15,8 +15,8 @@ export default class MIDIPreprocessor {
         dimensions: 64,
         startOctave: 3,
         horizontalResolution: 1 / 8,
-        stepSizeX: 1,
-        transpositions: [-5, +7],
+        stepSizeX: 2,
+        transpositions: [+5],
     }, batchProgress) {
         const { statusMessage } = toRefs(useStatusMessageStore())
 
