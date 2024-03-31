@@ -1,56 +1,47 @@
-import * as tf from '@tensorflow/tfjs'
+import * as tf from '@tensorflow/tfjs';
 
 export default function useDiscriminatorModel() {
-    // define the Adversarial model, binary classifier (is it real or fake)
-    // takes an image and outputs a probability that the image is human made music
-    const discriminatorModel = tf.sequential()
+    // Input layer
+    const inputs = tf.input({ shape: [64, 64, 1] });
 
-    // Input layer - adjust the inputShape to match your image size
-    discriminatorModel.add(tf.layers.conv2d({
-        inputShape: [64, 64, 1],  // Grayscale images
+    // First convolutional layer
+    const conv1 = tf.layers.conv2d({
         filters: 8,
         kernelSize: 3,
         strides: 2,
         padding: 'same',
         activation: 'relu'
-    }))
+    }).apply(inputs);
 
-    // Downsampling
-    discriminatorModel.add(tf.layers.conv2d({
+    // Second convolutional layer (downsampling)
+    const conv2 = tf.layers.conv2d({
         filters: 16,
         kernelSize: 3,
         strides: 2,
         padding: 'same',
         activation: 'relu'
-    }))
+    }).apply(conv1);
 
-    // Further downsampling
-    discriminatorModel.add(tf.layers.conv2d({
+    // Third convolutional layer (further downsampling)
+    const conv3 = tf.layers.conv2d({
         filters: 32,
         kernelSize: 3,
         strides: 2,
         padding: 'same',
         activation: 'relu'
-    }))
+    }).apply(conv2);
 
     // Flatten the output before the dense layer
-    discriminatorModel.add(tf.layers.flatten())
+    const flatten = tf.layers.flatten().apply(conv3);
 
     // Output layer - one unit with sigmoid activation for binary classification
-    discriminatorModel.add(tf.layers.dense({
+    const outputs = tf.layers.dense({
         units: 1,
         activation: 'sigmoid'
-    }))
+    }).apply(flatten);
 
-    // Compile the model with initial learning rate settings
-    const initialLearningRate = 0.001
-    const optimizer = tf.train.adam(initialLearningRate)
+    // Create the model
+    const model = tf.model({ inputs: inputs, outputs: outputs });
 
-    discriminatorModel.compile({
-        optimizer: optimizer,
-        loss: 'binaryCrossentropy',
-        metrics: ['accuracy']
-    })
-
-    return discriminatorModel
+    return model;
 }

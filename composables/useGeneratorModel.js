@@ -1,62 +1,49 @@
-import * as tf from '@tensorflow/tfjs'
+import * as tf from '@tensorflow/tfjs';
 
 export default function useGeneratorModel() {
-    // define the Generative model
-    // takes random noise and generates an image that can be converted to midi
-    // and should sound as if it was human made music
-    const generatorModel = tf.sequential()
+    // Input layer
+    const inputs = tf.input({ shape: [100] });
 
-    // input layer
-    generatorModel.add(tf.layers.dense({
-        inputShape: [100], // 100 paramaters for the noise
+    // Dense layer
+    const dense = tf.layers.dense({
         units: 8 * 8 * 256,
         activation: 'relu'
-    }))
+    }).apply(inputs);
 
-    // reshape to 3d tensor
-    generatorModel.add(tf.layers.reshape({
+    // Reshape layer to 3D tensor
+    const reshape = tf.layers.reshape({
         targetShape: [8, 8, 256]
-    }))
+    }).apply(dense);
 
-    // transposed convolutional layers to upscale the image
-    generatorModel.add(tf.layers.conv2dTranspose({
+    // First transposed convolutional layer to upscale the image
+    const conv2dTranspose1 = tf.layers.conv2dTranspose({
         filters: 128,
         kernelSize: 5,
         strides: 2,
         padding: 'same',
         activation: 'relu'
-    }))
+    }).apply(reshape);
 
-    // upscale again
-    generatorModel.add(tf.layers.conv2dTranspose({
+    // Second transposed convolutional layer to upscale again
+    const conv2dTranspose2 = tf.layers.conv2dTranspose({
         filters: 64,
         kernelSize: 5,
         strides: 2,
         padding: 'same',
         activation: 'relu'
-    }))
+    }).apply(conv2dTranspose1);
 
-    // output layer
-    generatorModel.add(tf.layers.conv2dTranspose({
+    // Output layer
+    const outputs = tf.layers.conv2dTranspose({
         filters: 1,
         kernelSize: 5,
         strides: 2,
         padding: 'same',
-        activation: 'sigmoid' // typical for GAN
-    }))
+        activation: 'sigmoid'
+    }).apply(conv2dTranspose2);
 
-    // compile the model
-    const initialLearningRate = 0.001
-    const optimizer = tf.train.adam(initialLearningRate)
+    // Create the generator model
+    const model = tf.model({ inputs: inputs, outputs: outputs });
 
-    // generators aren't trained directly, they are trained as part of the GAN
-    generatorModel.compile({
-        optimizer: optimizer,
-        loss: 'binaryCrossentropy'
-    })
-
-    console.log('Generator Model summary:')
-    generatorModel.summary()
-
-    return generatorModel
+    return model;
 }

@@ -1,23 +1,15 @@
 <script setup lang="jsx">
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue'
-import pako from 'pako'
-import JSZip from 'jszip'
 
 const menu = {
     "Export": [
         { label: 'as MIDI', icon: 'mdi:export', action: exportAsMIDI },
         { label: 'as WAV', icon: 'mdi:export', exportAsWAV },
     ],
-    "Import": [
-        { label: 'Training Data', icon: 'mdi:import', action: importTrainingData },
-    ],
     "Misc.": [
         { label: 'About', icon: 'ri:information-2-line' },
     ]
 }
-
-const { trainingData } = toRefs(useTrainingDataStore())
-const { statusMessage } = toRefs(useStatusMessageStore())
 
 function exportAsMIDI() {
     console.log('Exporting as MIDI...')
@@ -25,42 +17,6 @@ function exportAsMIDI() {
 
 function exportAsWAV() {
     console.log('Exporting as WAV...')
-}
-
-const fileInput = ref(null)
-function importTrainingData() {
-    console.log('Importing Training Data...')
-
-    fileInput.value.click()
-}
-
-async function handleFileImport(event) {
-    const file = event.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-
-    reader.onload = async (e) => {
-        try {
-            statusMessage.value = 'Importing training data...'
-            trainingData.value = []
-
-            // Decompress the zip
-            let zip = new JSZip()
-            let zipData = await zip.loadAsync(e.target.result)
-            zip = null
-            trainingData.value = zipData.files
-            zipData = null
-
-            console.log('trainingData', trainingData.value)
-
-            statusMessage.value = 'Training data imported successfully.'
-        } catch (error) {
-            statusMessage.value = `Error importing training data: ${error.message}`
-        }
-    }
-
-    reader.readAsArrayBuffer(file)
 }
 
 function NavMenuItem(props, context) {
@@ -78,8 +34,6 @@ function NavMenuItem(props, context) {
 
 <template>
     <div id="app-header" class="w-full z-10 h-fit relative py-2 px-8 bg-gray-50 shadow-md">
-        <!-- Hidden file input -->
-        <input type="file" ref="fileInput" style="display: none" @change="handleFileImport" accept=".zip" />
 
         <div class="flex flex-row justify-between items-center">
             <!-- App title -->

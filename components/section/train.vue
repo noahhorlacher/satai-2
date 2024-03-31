@@ -5,8 +5,11 @@ import pako from 'pako'
 
 const loading = ref(false)
 
-const { trainingData } = toRefs(useTrainingDataStore())
+let trainingData = []
+const fileInput = ref()
 const { statusMessage } = toRefs(useStatusMessageStore())
+
+const selectedSamplesName = ref()
 
 statusMessage.value = 'Press an action button to begin...'
 
@@ -109,20 +112,19 @@ function exportTrainingData(dataToExport, fileName) {
 }
 
 // initialize GAN model
-const generatorModel = ref()
-const discriminatorModel = ref()
-
+let generatorModel
+let discriminatorModel
 function initializeModel() {
     loading.value = true
-    generatorModel.value = useGeneratorModel()
-    discriminatorModel.value = useDiscriminatorModel()
+    generatorModel = useGeneratorModel()
+    discriminatorModel = useDiscriminatorModel()
     loading.value = false
 
     console.log('Generator Model summary:')
-    generatorModel.value.summary()
+    generatorModel.summary()
 
     console.log('Discriminator Model summary:')
-    discriminatorModel.value.summary()
+    discriminatorModel.summary()
 
     statusMessage.value = 'Models initialized.'
 }
@@ -130,93 +132,66 @@ function exponentialDecay(initialRate, decayRate, decaySteps, step) {
     return initialRate * Math.pow(decayRate, Math.floor(step / decaySteps));
 }
 
-function trainModel() {
+// Function to set trainable status for all layers of a model
+function setTrainableStatus(model, isTrainable) {
+    model.layers.forEach(layer => {
+        layer.trainable = isTrainable
+    })
+}
+
+async function trainModel() {
+    // Training parameters
     const epochs = 10
-    const epochsToSave = [1, 10, 20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000, 3000, 4000]
     const batchSize = 128
+    const zDim = 100 // Dimensionality of the generator input
+    const initialRate = 0.001
     const numBatches = 200
 
-    const initialRate = 0.001
-    const decayRate = 0.96
-    const decaySteps = 1000
-    let step = 0
+    // Compile both models
+    const optimizer = tf.train.adam(initialRate)
+    generatorModel.compile({ optimizer: optimizer, loss: 'binaryCrossentropy' })
+    discriminatorModel.compile({ optimizer: optimizer, loss: 'binaryCrossentropy', metrics: ['accuracy'] })
 
+    // Training loop
     for (let epoch = 0; epoch < epochs; epoch++) {
-        let totalDLoss, totalGLoss
-        let numBatchesProcessed = 0
+        for (let batch = 0; batch < numBatches / batchSize; batch++) {
+            console.log('batch', batch + 1, 'of', numBatches, 'in epoch', epoch + 1, 'of', epochs)
 
-        // batch processing
-        for (let batch = 0; batch < numBatches; batch++) {
-            // update leaning rate
-            const currentLearningRate = exponentialDecay(
-                initialRate,
-                decayRate,
-                decaySteps,
-                step)
+            // Generate noise for generator input
+            const z = tf.randomNormal([batchSize / 2, zDim])
 
-            // Recreate the optimizer with the new learning rate
-            const newOptimizer = tf.train.adam(currentLearningRate)
-            generatorModel.optimizer = newOptimizer
-            discriminatorModel.optimizer = newOptimizer
+            // Generate fake MIDI data
+            const fakeMIDI = generatorModel.predict(z)
 
-            // ----- train discriminator -----
-            // generate fake data using generator
-            const noise = tf.randomNormal([batchSize / 2, 100])
+            // Get real MIDI data batch
+            const realMIDIArray = getRandomSamples(batchSize / 2)
+            const realMIDITensor = tf.tensor4d(realMIDIArray, [batchSize / 2, fakeMIDI.shape[1], fakeMIDI.shape[2], fakeMIDI.shape[3]])
 
-            console.log('model', generatorModel.value)
-            const fakeData = generatorModel.value.predict(noise)
-            console.log('fakeData', fakeData)
+            // Concatenate real and fake data
+            console.log('mixedMIDI', realMIDITensor, fakeMIDI)
+            const mixedMIDI = tf.concat([realMIDITensor, fakeMIDI], 0);
 
-            // get real data (randomly sampled from training data)
-            const realData = pickRandomElements(trainingData.value, batchSize / 2)
+            console.log('mixedLabels')
+            const mixedLabels = tf.concat([tf.ones([batchSize / 2, 1]), tf.zeros([batchSize / 2, 1])], 0);
 
-            // combine and shuffle fake and real data
-            const combinedData = tf.concat([realData, fakeData])
-            // combine and shuffle labels (real: 1, fake: 0)
-            const realLabels = tf.ones([batchSize / 2, 1]); // Labels for real data
-            const fakeLabels = tf.zeros([batchSize / 2, 1]); // Labels for fake data
-            const labels = tf.concat([realLabels, fakeLabels])
+            // Train discriminator on both real and fake data
+            setTrainableStatus(discriminatorModel, true);
+            const dLoss = await discriminatorModel.trainOnBatch(mixedMIDI, mixedLabels);
 
-            // train discriminator
-            const dLoss = discriminatorModel.value.trainOnBatch(combinedData, labels)
-            totalDLoss += dLoss
+            // Generate new noise for generator training
+            const zNew = tf.randomNormal([batchSize, zDim]);
+            const misleadingLabels = tf.ones([batchSize, 1]);
 
-            // ----- Train Generator -----
-            // generate fake data (new noise)
-            const noiseForGen = tf.randomNormal([batchSize, 100])
-            // Create labels - all marked as real (to fool the discriminator)
-            const misleadingLabels = tf.ones([batchSize, 1])
+            // Train generator (via discriminator's error)
+            setTrainableStatus(discriminatorModel, false);
+            const gLoss = await generatorModel.trainOnBatch(zNew, misleadingLabels);
 
-            // Freeze discriminator weights during generator training
-            discriminatorModel.value.trainable = false
-
-            // train generator via discriminator
-            const gLoss = generatorModel.value.trainOnBatch(noiseForGen, misleadingLabels)
-            totalGLoss += gLoss
-
-            // unfreeze discriminator weights
-            discriminatorModel.value.trainable = true
-
-            // Log losses, update UI
-            statusMessage.value = `Epoch ${epoch + 1}/${epochs}, Batch ${batch + 1}/${numBatches}, D Loss: ${dLoss}, G Loss: ${gLoss}`
-
-            numBatchesProcessed++
-            step++
-        }
-
-        // Calculate the average loss over all batches
-        const avgDLoss = totalDLoss / numBatchesProcessed;
-        const avgGLoss = totalGLoss / numBatchesProcessed;
-
-        // Log the average loss for the epoch
-        statusMessage.value = `Epoch ${epoch + 1}/${epochs}, Avg D Loss: ${avgDLoss}, Avg G Loss: ${avgGLoss}`
-
-        // save model if saveable epoch
-        if (epochsToSave.includes(epoch + 1)) {
-            generatorModel.value.save(`localstorage://${epoch + 1}-generator`)
-            discriminatorModel.value.save(`localstorage://${epoch + 1}-discriminator`)
+            // Update UI
+            statusMessage.value = `Epoch ${epoch + 1}/${epochs}, Batch ${batch + 1}, D Loss: ${dLoss}, G Loss: ${gLoss}`;
         }
     }
+
+    statusMessage.value = 'Training complete.'
 }
 
 function generateMidiMatrix() {
@@ -224,21 +199,70 @@ function generateMidiMatrix() {
     const scaledData = generatedData.mul(255)
 }
 
-function pickRandomElements(arr, n) {
-    let result = arr.slice()
-    for (let i = result.length - 1; i > 0; i--) {
-        // Generate random index
-        let j = Math.floor(Math.random() * (i + 1))
-        // Swap elements at indices i and j
-        [result[i], result[j]] = [result[j], result[i]]
+function getRandomSamples(n) {
+    // Ensure trainingData is not empty
+    if (!trainingData || trainingData.length === 0) {
+        console.error("No training data available")
+        return []
     }
-    // Return the first n elements
-    return result.slice(0, n)
+
+    // get a random batch from the trainingData
+    let randomBatchIndex = Math.floor(Math.random() * trainingData.length)
+
+    const randomBatchFile = trainingData[randomBatchIndex]
+
+    // unzip the batch
+    const unzippedData = pako.ungzip(randomBatchFile)
+    const array = JSON.parse(new TextDecoder().decode(unzippedData))
+
+    // get n random elements from array
+    const result = []
+    for (let i = 0; i < n; i++) {
+        const randomIndex = Math.floor(Math.random() * array.length)
+        result.push(array[randomIndex])
+    }
+
+    return result
+}
+
+async function handleFileImport(event) {
+    const file = event.target.files[0]
+    if (!file) return
+
+    const reader = new FileReader()
+
+    reader.onload = async (e) => {
+        try {
+            statusMessage.value = 'Importing training data...'
+            trainingData = []
+
+            selectedSamplesName.value = event.target.files[0].name
+
+            // Decompress the zip
+            let zip = new JSZip()
+            let zipData = await zip.loadAsync(e.target.result)
+            zip = null
+
+            Object.keys(zipData.files).forEach(async (filename) => {
+                const fileData = await zipData.files[filename].async('uint8array')
+                trainingData.push(fileData)
+            })
+
+            zipData = null
+
+            statusMessage.value = 'Training data imported successfully.'
+        } catch (error) {
+            statusMessage.value = `Error importing training data: ${error.message}`
+        }
+    }
+
+    reader.readAsArrayBuffer(file)
 }
 </script>
 
 <template>
     <app-section title="Train">
+
         <div class="flex flex-row justify-between items-center mb-2">
             <h3 class="text-sm">Status</h3>
         </div>
@@ -260,6 +284,19 @@ function pickRandomElements(arr, n) {
             <el-select v-model="selectedTrainingDataUrl" placeholder="Select Training Data ZIP" size="large">
                 <el-option v-for="item in trainingZips" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
+        </div>
+
+        <div>
+            <!-- Hidden file input -->
+            <h3 class="text-sm mt-6 mb-2">Load Processed Training Samples (.zip)</h3>
+            <p v-if="selectedSamplesName" class="text-xs mb-4 text-gray-500 font-bold">Selected samples:<br><span
+                    class="italic font-regular">{{
+            selectedSamplesName }}</span></p>
+            <el-button @click="fileInput.click()" :disabled="loading" size="large">
+                <icon class="mr-2" name="material-symbols:attach-file" size="1.5em" />
+                Choose File
+            </el-button>
+            <input class="hidden" type="file" ref="fileInput" @change="handleFileImport" accept=".zip" />
         </div>
 
     </app-section>
