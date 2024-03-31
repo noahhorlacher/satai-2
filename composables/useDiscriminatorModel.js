@@ -42,11 +42,14 @@ export default function useDiscriminatorModel() {
         activation: 'sigmoid'
     }))
 
-    // Compile the model
+    // Compile the model with initial learning rate settings
+    const initialLearningRate = 0.001
+    const optimizer = tf.train.adam(initialLearningRate)
+
     discriminatorModel.compile({
-        optimizer: 'adam',
+        optimizer: optimizer,
         loss: 'binaryCrossentropy',
-        metrics: ['accuracy']  // It's useful to track accuracy for the discriminator
+        metrics: ['accuracy']
     })
 
     return discriminatorModel
