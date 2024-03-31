@@ -12,7 +12,7 @@ const fileInput = ref()
 
 statusMessage.value = 'Press an action button to begin...'
 
-const dataPreprocessorBatchSize = 200
+const dataPreprocessorBatchSize = 400
 
 let loadedUnprocessedName
 let loadedUnprocessedData

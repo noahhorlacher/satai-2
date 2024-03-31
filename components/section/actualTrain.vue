@@ -4,30 +4,30 @@ import JSZip from 'jszip'
 import pako from 'pako'
 import { Midi } from '@tonejs/midi'
 
-const chartData = reactive({
-    labels: [],
-    datasets: [
-        {
-            label: 'Generator Loss',
-            backgroundColor: 'rgba(54, 162, 235, 0.2)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 1,
-            data: []
-        },
-        {
-            label: 'Discriminator Loss',
-            backgroundColor: 'rgba(255, 99, 132, 0.2)',
-            borderColor: 'rgba(255, 99, 132, 1)',
-            borderWidth: 1,
-            data: []
-        }
-    ]
-})
+/*
+    architecture of discriminator and generator
+    https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
+*/
 
 const chartOptions = reactive({
-    responsive: true,
-    maintainAspectRatio: false,
+    chart: {
+        type: 'line'
+    },
+    xaxis: {
+        categories: []
+    }
 })
+
+const chartSeries = reactive([
+    {
+        name: 'GAN Loss',
+        data: []
+    },
+    {
+        name: 'Discriminator Loss',
+        data: []
+    }
+])
 
 const fileInput = ref()
 const selectedSamplesName = ref()
@@ -39,51 +39,115 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 const discriminatorLearningRate = 0.0002
 const ganLearningRate = 0.0001
 
-// initialize GAN model
-const discriminator = tf.sequential()
+const discriminator = tf.sequential();
 
+// First Convolutional layer - Assuming a larger kernel and stride to reduce dimension significantly
 discriminator.add(tf.layers.conv2d({
     inputShape: [64, 64, 1],
-    filters: 32,
-    kernelSize: 5,
-    strides: 2,
-    activation: 'relu',
+    filters: 128,
+    kernelSize: [5, 5],
+    strides: [2, 2],
     padding: 'same',
-}))
+    activation: 'relu'
+}));
 
-// Add a Leaky ReLU layer.
-discriminator.add(tf.layers.leakyReLU());
+// Pooling Layer
+discriminator.add(tf.layers.maxPooling2d({
+    poolSize: [2, 2],
+    strides: [2, 2]
+}));
 
-// Add another convolutional layer.
-discriminator.add(tf.layers.conv2d({ filters: 64, kernelSize: 5, strides: 2, padding: 'same' }));
+// Second Convolutional layer
+discriminator.add(tf.layers.conv2d({
+    filters: 64,
+    kernelSize: [3, 3],
+    strides: [1, 1],
+    padding: 'same',
+    activation: 'relu'
+}));
 
-// Add another Leaky ReLU layer.
-discriminator.add(tf.layers.leakyReLU());
+// Pooling Layer
+discriminator.add(tf.layers.maxPooling2d({
+    poolSize: [2, 2],
+    strides: [2, 2]
+}));
 
-// Add a flatten layer.
+// Third Convolutional layer
+discriminator.add(tf.layers.conv2d({
+    filters: 32,
+    kernelSize: [3, 3],
+    strides: [1, 1],
+    padding: 'same',
+    activation: 'relu'
+}));
+
+// Pooling Layer
+discriminator.add(tf.layers.maxPooling2d({
+    poolSize: [2, 2],
+    strides: [2, 2]
+}));
+
+// Flatten layer
 discriminator.add(tf.layers.flatten());
 
-// Add a fully connected layer.
-discriminator.add(tf.layers.dense({ units: 1 }));
-
-// Add a sigmoid activation layer.
-discriminator.add(tf.layers.activation({ activation: 'sigmoid' }))
+// Fully Connected Layer
+discriminator.add(tf.layers.dense({
+    units: 1,
+    activation: 'sigmoid'
+}))
 
 const generator = tf.sequential();
 
+// Start with a dense layer taking the input noise vector (size 100)
 generator.add(tf.layers.dense({
     inputShape: [100],
-    units: 64 * 64 * 1,
-}))
+    units: 256, // first dense layer with 256 units
+    activation: 'relu'
+}));
 
+// Adding another dense layer to expand
+generator.add(tf.layers.dense({
+    units: 128 * 8 * 8, // enough units for the subsequent reshape
+    activation: 'relu'
+}));
+
+// Reshape to a 3D volume
 generator.add(tf.layers.reshape({
-    targetShape: [64, 64, 1],
+    targetShape: [8, 8, 128] // reshaping to an 8x8 feature map with 128 channels
+}));
+
+// Use Conv2DTranspose to upscale the image dimensions while reducing depth
+// First Conv2DTranspose layer
+generator.add(tf.layers.conv2dTranspose({
+    filters: 64, // reducing the number of filters/channels
+    kernelSize: 5,
+    strides: 2, // stride of 2 will double the dimensions
+    padding: 'same',
+    activation: 'relu'
+}));
+
+// Second Conv2DTranspose layer
+generator.add(tf.layers.conv2dTranspose({
+    filters: 32, // continue reducing the number of filters/channels
+    kernelSize: 5,
+    strides: 2, // another stride of 2 to double the dimensions again
+    padding: 'same',
+    activation: 'relu'
+}));
+
+// Third Conv2DTranspose layer to reach the final size
+generator.add(tf.layers.conv2dTranspose({
+    filters: 1, // reducing to 1 channel for a grayscale image
+    kernelSize: 5,
+    strides: 2, // this should bring us to our target size of 64x64
+    padding: 'same',
+    activation: 'tanh' // tanh activation to output values in range [-1, 1]
 }))
 
 // Compile the discriminator
 discriminator.compile({
     loss: 'binaryCrossentropy',
-    optimizer: tf.train.sgd(discriminatorLearningRate, 0.5, 0.999)
+    optimizer: tf.train.adam(discriminatorLearningRate, 0.5, 0.999)
 })
 
 const gan = tf.sequential()
@@ -97,10 +161,9 @@ gan.compile({
 })
 
 const epochs = 100
-async function train() {
+async function trainModel() {
     for (let i = 0; i < epochs; i++) {
-        console.log(`Training epoch ${i + 1} of ${epochs}...`)
-        statusMessage.value = `Training epoch ${i + 1} of ${epochs}...`
+        chartOptions.xaxis.categories.push(`Epoch ${i}`)
 
         let realImagesArray = getRandomSamples(10)
 
@@ -126,33 +189,34 @@ async function train() {
         const fakeImages = generator.predict(noise)
 
         // Create a batch of labels for the real and fake images.
-        const realLabels = tf.ones([10, 1])
-        const fakeLabels = tf.zeros([10, 1])
+        // With label smoothing
+        const realLabels = tf.ones([10, 1]).mul(0.9)
+        const fakeLabels = tf.zeros([10, 1]).mul(0.1)
 
         try {
-            // Train the discriminator on real and fake images.
-            await discriminator.trainOnBatch(realImages, realLabels)
-            const dLoss = await discriminator.trainOnBatch(fakeImages, fakeLabels)
+            // Train the discriminator on real and fake images 10 times.
+            let dLoss
 
-            chartData.datasets[1].data.push(dLoss)
+            // for (let j = 0; j < 10; j++) {
+            await discriminator.trainOnBatch(realImages, realLabels)
+            dLoss = await discriminator.trainOnBatch(fakeImages, fakeLabels)
+            // }
 
             // Train the generator via the gan model
             const misleadingLabels = tf.ones([10, 1])
             const gLoss = await gan.trainOnBatch(noise, misleadingLabels)
 
-            chartData.datasets[0].data.push(gLoss)
+            chartSeries[0].data.push(gLoss.toFixed(5))
+            chartSeries[1].data.push(dLoss.toFixed(5))
 
-            console.log('gLoss', gLoss, 'dLoss', dLoss)
-            statusMessage.value = `gLoss: ${gLoss}, dLoss: ${dLoss}`
-            // Optional: Visualize or evaluate the results as needed
-            // ...
+            statusMessage.value = `Trained epoch ${i + 1} of ${epochs}.\nGAN loss: ${gLoss}\nDiscriminator loss: ${dLoss}`
         } catch (error) {
             console.error('Error training:', error)
             statusMessage.value = 'Error training. Check console'
         }
     }
 
-    console.log('Training complete')
+    statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`
 }
 
 function getRandomSamples(n) {
@@ -260,12 +324,15 @@ function generate() {
 
 <template>
     <div>
-        <!-- <Line :data="chartData" :options="chartOptions" /> -->
+        <div class="">
+            <h3 class="text-sm mt-6 mb-2">Loss/Epoch</h3>
+            <apexchart type="line" height="300px" :series="chartSeries" :options="chartOptions" />
+        </div>
         <!-- Hidden file input -->
         <h3 class="text-sm mt-6 mb-2">Load Processed Training Samples (.zip)</h3>
         <p v-if="selectedSamplesName" class="text-xs mb-4 text-gray-500 font-bold">Selected samples:<br><span
                 class="italic font-regular">{{
-            selectedSamplesName }}</span></p>
+                selectedSamplesName }}</span></p>
         <el-button @click="fileInput.click()" size="large">
             <icon class="mr-2" name="material-symbols:attach-file" size="1.5em" />
             Choose File
@@ -273,6 +340,6 @@ function generate() {
         <input class="hidden" type="file" ref="fileInput" @change="handleFileImport" accept=".zip" />
     </div>
 
-    <el-button @click="train">Train Model</el-button>
+    <el-button @click="trainModel">Train Model</el-button>
     <el-button @click="generate">Generate</el-button>
 </template>

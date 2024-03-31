@@ -154,7 +154,7 @@ export default class MIDIPreprocessor {
             const y = (note.midi - (startOctave * 12)) % dimensions // Calculate y coordinate
 
             if (y >= 0 && y <= dimensions - 1) {
-                const velocity = Math.floor((note.velocity || 1.0) * 255) // Convert velocity to grayscale value
+                const velocity = note.velocity // Convert velocity to grayscale value
 
                 // Handle the case where multiple notes map to the same pixel
                 // Here, we're just setting it to the brightness of the note, but you might want to average or take max/min
