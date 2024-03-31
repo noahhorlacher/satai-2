@@ -19,12 +19,14 @@
     "@pinia/nuxt": "^0.5.1",
     "@tensorflow/tfjs": "^4.17.0",
     "@tonejs/midi": "^2.0.28",
+    "chart.js": "^4.4.2",
     "jszip": "^3.10.1",
     "nuxt": "^3.11.1",
     "nuxt-icon": "^0.6.10",
     "pako": "^2.1.0",
     "pinia": "^2.1.7",
     "vue": "^3.4.21",
+    "vue-chartjs": "^5.3.0",
     "vue-router": "^4.3.0"
   }
 }

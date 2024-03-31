@@ -1,47 +1,34 @@
 import * as tf from '@tensorflow/tfjs';
 
 export default function useDiscriminatorModel() {
-    // Input layer
-    const inputs = tf.input({ shape: [64, 64, 1] });
+    const discriminator = tf.sequential()
 
-    // First convolutional layer
-    const conv1 = tf.layers.conv2d({
-        filters: 8,
-        kernelSize: 3,
-        strides: 2,
-        padding: 'same',
-        activation: 'relu'
-    }).apply(inputs);
-
-    // Second convolutional layer (downsampling)
-    const conv2 = tf.layers.conv2d({
-        filters: 16,
-        kernelSize: 3,
-        strides: 2,
-        padding: 'same',
-        activation: 'relu'
-    }).apply(conv1);
-
-    // Third convolutional layer (further downsampling)
-    const conv3 = tf.layers.conv2d({
+    discriminator.add(tf.layers.conv2d({
+        inputShape: [64, 64, 1],
         filters: 32,
-        kernelSize: 3,
+        kernelSize: 5,
         strides: 2,
+        activation: 'relu',
         padding: 'same',
-        activation: 'relu'
-    }).apply(conv2);
+    }))
 
-    // Flatten the output before the dense layer
-    const flatten = tf.layers.flatten().apply(conv3);
+    // Add a Leaky ReLU layer.
+    discriminator.add(tf.layers.leakyReLU());
 
-    // Output layer - one unit with sigmoid activation for binary classification
-    const outputs = tf.layers.dense({
-        units: 1,
-        activation: 'sigmoid'
-    }).apply(flatten);
+    // Add another convolutional layer.
+    discriminator.add(tf.layers.conv2d({ filters: 64, kernelSize: 5, strides: 2, padding: 'same' }));
 
-    // Create the model
-    const model = tf.model({ inputs: inputs, outputs: outputs });
+    // Add another Leaky ReLU layer.
+    discriminator.add(tf.layers.leakyReLU());
 
-    return model;
+    // Add a flatten layer.
+    discriminator.add(tf.layers.flatten());
+
+    // Add a fully connected layer.
+    discriminator.add(tf.layers.dense({ units: 1 }));
+
+    // Add a sigmoid activation layer.
+    discriminator.add(tf.layers.activation({ activation: 'sigmoid' }))
+
+    return discriminator
 }

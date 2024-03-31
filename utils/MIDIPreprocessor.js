@@ -94,7 +94,11 @@ export default class MIDIPreprocessor {
 
                 // create image with transposition 0
                 const normalMidiMatrix = await MIDIPreprocessor.createMidiMatrix(midiSegmentNotes, dimensions, startOctave, PPQ);
-                processedMidiMatrices.push(normalMidiMatrix);
+                if (normalMidiMatrix.length == 64 && normalMidiMatrix[0].length == 64) {
+                    processedMidiMatrices.push(normalMidiMatrix);
+                } else {
+                    throw 'Error: Matrix is not 64x64.'
+                }
 
                 for (let transposition of transpositions) {
                     const transposedSegmentNotes = MIDIPreprocessor.transposeNotes(midiSegmentNotes, transposition);
