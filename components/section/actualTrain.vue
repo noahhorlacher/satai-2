@@ -9,12 +9,17 @@ import { Midi } from '@tonejs/midi'
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
 
+const midiVelocityThreshold = 0.1
+
 const chartOptions = reactive({
     chart: {
         type: 'line'
     },
     xaxis: {
-        categories: []
+        labels: {
+            show: false
+        },
+        categories: [],
     }
 })
 
@@ -36,7 +41,7 @@ let trainingData = []
 
 const { statusMessage } = toRefs(useStatusMessageStore())
 
-const discriminatorLearningRate = 0.0002
+const discriminatorLearningRate = 0.0001
 const ganLearningRate = 0.0001
 
 const discriminator = tf.sequential();
@@ -101,48 +106,56 @@ const generator = tf.sequential();
 // Start with a dense layer taking the input noise vector (size 100)
 generator.add(tf.layers.dense({
     inputShape: [100],
-    units: 256, // first dense layer with 256 units
-    activation: 'relu'
+    units: 512, // Increased units for more capacity
+    useBias: false
 }));
+generator.add(tf.layers.batchNormalization());
+generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
 
 // Adding another dense layer to expand
 generator.add(tf.layers.dense({
-    units: 128 * 8 * 8, // enough units for the subsequent reshape
-    activation: 'relu'
+    units: 256 * 8 * 8, // Increased units for subsequent reshape
+    useBias: false
 }));
+generator.add(tf.layers.batchNormalization());
+generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
 
 // Reshape to a 3D volume
 generator.add(tf.layers.reshape({
-    targetShape: [8, 8, 128] // reshaping to an 8x8 feature map with 128 channels
+    targetShape: [8, 8, 256] // Increased depth for richer feature representation
 }));
 
 // Use Conv2DTranspose to upscale the image dimensions while reducing depth
 // First Conv2DTranspose layer
 generator.add(tf.layers.conv2dTranspose({
-    filters: 64, // reducing the number of filters/channels
+    filters: 128, // Increased filter count
     kernelSize: 5,
-    strides: 2, // stride of 2 will double the dimensions
+    strides: 2,
     padding: 'same',
-    activation: 'relu'
+    useBias: false
 }));
+generator.add(tf.layers.batchNormalization());
+generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
 
 // Second Conv2DTranspose layer
 generator.add(tf.layers.conv2dTranspose({
-    filters: 32, // continue reducing the number of filters/channels
+    filters: 64, // Increased filter count
     kernelSize: 5,
-    strides: 2, // another stride of 2 to double the dimensions again
+    strides: 2,
     padding: 'same',
-    activation: 'relu'
+    useBias: false
 }));
+generator.add(tf.layers.batchNormalization());
+generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
 
 // Third Conv2DTranspose layer to reach the final size
 generator.add(tf.layers.conv2dTranspose({
-    filters: 1, // reducing to 1 channel for a grayscale image
+    filters: 1, // Single channel for grayscale image
     kernelSize: 5,
-    strides: 2, // this should bring us to our target size of 64x64
+    strides: 2,
     padding: 'same',
-    activation: 'tanh' // tanh activation to output values in range [-1, 1]
-}))
+    activation: 'sigmoid'
+}));
 
 // Compile the discriminator
 discriminator.compile({
@@ -162,6 +175,8 @@ gan.compile({
 
 const epochs = 100
 async function trainModel() {
+    let backend = tf.getBackend()
+
     for (let i = 0; i < epochs; i++) {
         chartOptions.xaxis.categories.push(`Epoch ${i}`)
 
@@ -194,13 +209,11 @@ async function trainModel() {
         const fakeLabels = tf.zeros([10, 1]).mul(0.1)
 
         try {
-            // Train the discriminator on real and fake images 10 times.
-            let dLoss
+            // Train the discriminator on real and fake images
+            let dLossReal = await discriminator.trainOnBatch(realImages, realLabels)
+            let dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels)
 
-            // for (let j = 0; j < 10; j++) {
-            await discriminator.trainOnBatch(realImages, realLabels)
-            dLoss = await discriminator.trainOnBatch(fakeImages, fakeLabels)
-            // }
+            const dLoss = (dLossReal + dLossFake) / 2
 
             // Train the generator via the gan model
             const misleadingLabels = tf.ones([10, 1])
@@ -209,11 +222,13 @@ async function trainModel() {
             chartSeries[0].data.push(gLoss.toFixed(5))
             chartSeries[1].data.push(dLoss.toFixed(5))
 
-            statusMessage.value = `Trained epoch ${i + 1} of ${epochs}.\nGAN loss: ${gLoss}\nDiscriminator loss: ${dLoss}`
+            statusMessage.value = `Using [${backend}]\nTrained epoch ${i + 1} of ${epochs}.\nGAN loss: ${gLoss}\nDiscriminator loss: ${dLoss}`
         } catch (error) {
             console.error('Error training:', error)
             statusMessage.value = 'Error training. Check console'
         }
+
+        await tf.nextFrame()
     }
 
     statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`
@@ -282,8 +297,7 @@ async function handleFileImport(event) {
 function generate() {
     const noise = tf.randomNormal([1, 100])
     const generatedData = generator.predict(noise)
-    const scaledData = generatedData.mul(255)
-    const data = scaledData.arraySync()
+    const data = generatedData.arraySync()
 
     // Convert the data to a MIDI files
     const midi = new Midi()
@@ -291,20 +305,21 @@ function generate() {
     // Add a track
     const track = midi.addTrack()
 
+    console.log('data', data)
+
     // Add notes
     data[0].forEach((row, rowIndex) => {
         row.forEach((value, columnIndex) => {
-            if (value > 127) {
-                value = 127
-            } else if (value < 0) {
-                value = 0
-            }
+            // clamp 
+            const velocity = Math.max(0, Math.min(1.0, value))
+
+            if (velocity < midiVelocityThreshold) return
 
             track.addNote({
-                midi: value,
+                midi: rowIndex + 36, // startOctave = 3
                 time: columnIndex,
                 duration: 100,
-                velocity: value
+                velocity: velocity
             })
         })
     })
@@ -330,14 +345,16 @@ function generate() {
         </div>
         <!-- Hidden file input -->
         <h3 class="text-sm mt-6 mb-2">Load Processed Training Samples (.zip)</h3>
-        <p v-if="selectedSamplesName" class="text-xs mb-4 text-gray-500 font-bold">Selected samples:<br><span
-                class="italic font-regular">{{
+        <div class="mb-4">
+            <p v-if="selectedSamplesName" class="text-xs mb-4 text-gray-500 font-bold">Selected samples:<br><span
+                    class="italic font-regular">{{
                 selectedSamplesName }}</span></p>
-        <el-button @click="fileInput.click()" size="large">
-            <icon class="mr-2" name="material-symbols:attach-file" size="1.5em" />
-            Choose File
-        </el-button>
-        <input class="hidden" type="file" ref="fileInput" @change="handleFileImport" accept=".zip" />
+            <el-button @click="fileInput.click()" size="large">
+                <icon class="mr-2" name="material-symbols:attach-file" size="1.5em" />
+                Choose File
+            </el-button>
+            <input class="hidden" type="file" ref="fileInput" @change="handleFileImport" accept=".zip" />
+        </div>
     </div>
 
     <el-button @click="trainModel">Train Model</el-button>

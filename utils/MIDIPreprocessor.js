@@ -1,3 +1,4 @@
+import { norm } from '@tensorflow/tfjs'
 import { Midi } from '@tonejs/midi'
 
 const pitches = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
@@ -17,6 +18,7 @@ export default class MIDIPreprocessor {
         horizontalResolution: 1 / 8,
         stepSizeX: 2,
         transpositions: [+5],
+        minimumNotes: 6
     }, batchProgress) {
         const { statusMessage } = toRefs(useStatusMessageStore())
 
@@ -94,17 +96,29 @@ export default class MIDIPreprocessor {
 
                 // create image with transposition 0
                 const normalMidiMatrix = await MIDIPreprocessor.createMidiMatrix(midiSegmentNotes, dimensions, startOctave, PPQ);
-                if (normalMidiMatrix.length == 64 && normalMidiMatrix[0].length == 64) {
-                    processedMidiMatrices.push(normalMidiMatrix);
+                let isCorrectSize = normalMidiMatrix.length == 64 && normalMidiMatrix[0].length == 64
+                let amountNotes = normalMidiMatrix.reduce((acc, row) => acc + row.reduce((acc2, note) => acc + (note > 0 ? 1 : 0), 0), 0)
+                let hasAtLeastMinimumNotes = amountNotes >= options.minimumNotes
+
+                if (isCorrectSize && hasAtLeastMinimumNotes) {
+                    processedMidiMatrices.push(normalMidiMatrix)
                 } else {
-                    throw 'Error: Matrix is not 64x64.'
+                    if (!isCorrectSize) {
+                        throw 'Error: Matrix is not 64x64.'
+                    } else if (!hasAtLeastMinimumNotes) {
+                        throw `Error: Matrix has ${amountNotes} notes but needs at least ${options.minimumNotes}.`
+                    }
                 }
 
-                for (let transposition of transpositions) {
-                    const transposedSegmentNotes = MIDIPreprocessor.transposeNotes(midiSegmentNotes, transposition);
-                    const midiMatrix = await MIDIPreprocessor.createMidiMatrix(transposedSegmentNotes, dimensions, startOctave, PPQ);
-                    processedMidiMatrices.push(midiMatrix);
-                }
+                if (normalMidiMatrix.some) {
+                    continue
+                } else
+
+                    for (let transposition of transpositions) {
+                        const transposedSegmentNotes = MIDIPreprocessor.transposeNotes(midiSegmentNotes, transposition);
+                        const midiMatrix = await MIDIPreprocessor.createMidiMatrix(transposedSegmentNotes, dimensions, startOctave, PPQ);
+                        processedMidiMatrices.push(midiMatrix);
+                    }
             }
         } catch (e) {
             console.error(e)
@@ -154,11 +168,7 @@ export default class MIDIPreprocessor {
             const y = (note.midi - (startOctave * 12)) % dimensions // Calculate y coordinate
 
             if (y >= 0 && y <= dimensions - 1) {
-                const velocity = note.velocity // Convert velocity to grayscale value
-
-                // Handle the case where multiple notes map to the same pixel
-                // Here, we're just setting it to the brightness of the note, but you might want to average or take max/min
-                midiMatrix[y][x] = velocity
+                midiMatrix[y][x] = note.velocity
             }
         })
 
