@@ -1,25 +1,22 @@
 <script setup>
+import * as tf from '@tensorflow/tfjs'
 import JSZip from 'jszip'
 import pako from 'pako'
 
 const loading = ref(false)
 
-const cancelAction = ref(false)
-
 const { trainingData } = toRefs(useTrainingDataStore())
 const { statusMessage } = toRefs(useStatusMessageStore())
 
-statusMessage.value = 'Press a button to begin...'
+statusMessage.value = 'Press an action button to begin...'
 
 const dataPreprocessorBatchSize = 1000
 
 // load midi data
 // my midi files were already pre-processed to only have 1 track (track 0)
 let midiFiles = []
-const dataLoaded = ref(false)
 async function loadData() {
     loading.value = true
-    cancelAction.value = false
 
     midiFiles = []
 
@@ -37,10 +34,6 @@ async function loadData() {
 
         // Unzip each file
         for (const [filename, file] of Object.entries(zip.files)) {
-            if (cancelAction.value) {
-                break
-            }
-
             statusMessage.value = `Unzipping midi file ${idx++}/${filesAmount}\n(${filename})`
 
             if (filename.endsWith('.midi') || filename.endsWith('.mid')) {
@@ -49,8 +42,7 @@ async function loadData() {
             }
         }
 
-        statusMessage.value = cancelAction.value ? `Loading Canceled` : `Loaded ${midiFiles.length} MIDI files.`
-        dataLoaded.value = !cancelAction.value
+        statusMessage.value = `Loaded ${midiFiles.length} MIDI files.`
     } catch (err) {
         console.error('Error loading midi files:', err)
         statusMessage.value = 'Error loading midi files. Check console'
@@ -60,41 +52,47 @@ async function loadData() {
 }
 
 // preprocess midi data for training
-const preprocessedData = ref()
-const dataPreprocessed = ref(false)
 async function preprocessData() {
     loading.value = true
+    let allData = [] // Array to collect all preprocessed data
 
-    let batchNumber = 1
-    for(let i = 0; i < midiFiles.length; i+=dataPreprocessorBatchSize) {
-        const batch = midiFiles.slice(i, i+dataPreprocessorBatchSize)
-        const _preprocessedData = await MIDIPreprocessor.preprocess(batch, undefined, `${batchNumber} of ${Math.ceil(midiFiles.length/dataPreprocessorBatchSize)}`)
+    let batchSizes = dataPreprocessorBatchSize > 0 ? dataPreprocessorBatchSize : midiFiles.length
+    const amountBatches = Math.ceil(midiFiles.length / batchSizes)
 
-        exportTrainingData(_preprocessedData, `${batchNumber}-of-${Math.ceil(midiFiles.length/dataPreprocessorBatchSize)}`)
+    for (let i = 0; i < midiFiles.length; i += batchSizes) {
+        const batch = midiFiles.slice(i, i + batchSizes)
 
-        batchNumber++
+        let currentBatch = i / batchSizes + 1
+        const _preprocessedData = await MIDIPreprocessor.preprocess(batch, undefined, `${currentBatch} of ${amountBatches}`)
+
+        // Collect preprocessed data into a single array
+        allData.push(..._preprocessedData)
     }
 
-    statusMessage.value = 'Preprocessing complete.'
+    // Compress the entire array of preprocessed data
+    statusMessage.value = `Compressing all data`
+    const data = JSON.stringify(allData)
+    const compressedData = pako.gzip(data)
 
+    exportTrainingData(compressedData, 'SatAi-Training-Data')
+
+    statusMessage.value = 'Preprocessing complete.'
     loading.value = false
 }
 
-function exportTrainingData(dataToExport, batchProgress) {
-    statusMessage.value = `downloading training data part ${batchProgress}...`
+async function createTrainingData() {
+    await loadData()
+    await preprocessData()
+}
 
-    if(!dataToExport || dataToExport.length === 0) {
-        return
-    }
+function exportTrainingData(dataToExport, fileName) {
+    statusMessage.value = `Downloading training data...`
 
-    const data = JSON.stringify(dataToExport)
-    const compressedData = pako.deflate(data)
-
-    const blob = new Blob([compressedData], { type: 'application/gzip' })
+    const blob = new Blob([new Uint8Array(dataToExport)], { type: 'application/gzip' });
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `training-data-part-${batchProgress}.json.gz`
+    a.download = `${fileName}.json.gz`
     a.click()
     URL.revokeObjectURL(url)
     a.remove()
@@ -115,6 +113,117 @@ function initializeModel() {
 
     console.log('Discriminator Model summary:')
     discriminatorModel.value.summary()
+
+    statusMessage.value = 'Models initialized.'
+}
+function exponentialDecay(initialRate, decayRate, decaySteps, step) {
+    return initialRate * Math.pow(decayRate, Math.floor(step / decaySteps));
+}
+
+function trainModel() {
+    const epochs = 10
+    const epochsToSave = [1, 10, 20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000, 3000, 4000]
+    const batchSize = 128
+    const numBatches = 200
+
+    const initialRate = 0.001
+    const decayRate = 0.96
+    const decaySteps = 1000
+    let step = 0
+
+    for (let epoch = 0; epoch < epochs; epoch++) {
+        let totalDLoss, totalGLoss
+        let numBatchesProcessed = 0
+
+        // batch processing
+        for (let batch = 0; batch < numBatches; batch++) {
+            // update leaning rate
+            const currentLearningRate = exponentialDecay(
+                initialRate,
+                decayRate,
+                decaySteps,
+                step)
+
+            // Recreate the optimizer with the new learning rate
+            const newOptimizer = tf.train.adam(currentLearningRate)
+            generatorModel.optimizer = newOptimizer
+            discriminatorModel.optimizer = newOptimizer
+
+            // ----- train discriminator -----
+            // generate fake data using generator
+            const noise = tf.randomNormal([batchSize / 2, 100])
+
+            console.log('model', generatorModel.value)
+            const fakeData = generatorModel.value.predict(noise)
+            console.log('fakeData', fakeData)
+
+            // get real data (randomly sampled from training data)
+            const realData = pickRandomElements(trainingData.value, batchSize / 2)
+
+            // combine and shuffle fake and real data
+            const combinedData = tf.concat([realData, fakeData])
+            // combine and shuffle labels (real: 1, fake: 0)
+            const realLabels = tf.ones([batchSize / 2, 1]); // Labels for real data
+            const fakeLabels = tf.zeros([batchSize / 2, 1]); // Labels for fake data
+            const labels = tf.concat([realLabels, fakeLabels])
+
+            // train discriminator
+            const dLoss = discriminatorModel.value.trainOnBatch(combinedData, labels)
+            totalDLoss += dLoss
+
+            // ----- Train Generator -----
+            // generate fake data (new noise)
+            const noiseForGen = tf.randomNormal([batchSize, 100])
+            // Create labels - all marked as real (to fool the discriminator)
+            const misleadingLabels = tf.ones([batchSize, 1])
+
+            // Freeze discriminator weights during generator training
+            discriminatorModel.value.trainable = false
+
+            // train generator via discriminator
+            const gLoss = generatorModel.value.trainOnBatch(noiseForGen, misleadingLabels)
+            totalGLoss += gLoss
+
+            // unfreeze discriminator weights
+            discriminatorModel.value.trainable = true
+
+            // Log losses, update UI
+            statusMessage.value = `Epoch ${epoch + 1}/${epochs}, Batch ${batch + 1}/${numBatches}, D Loss: ${dLoss}, G Loss: ${gLoss}`
+
+            numBatchesProcessed++
+            step++
+        }
+
+        // Calculate the average loss over all batches
+        const avgDLoss = totalDLoss / numBatchesProcessed;
+        const avgGLoss = totalGLoss / numBatchesProcessed;
+
+        // Log the average loss for the epoch
+        statusMessage.value = `Epoch ${epoch + 1}/${epochs}, Avg D Loss: ${avgDLoss}, Avg G Loss: ${avgGLoss}`
+
+        // save model if saveable epoch
+        if (epochsToSave.includes(epoch + 1)) {
+            generatorModel.value.save(`localstorage://${epoch + 1}-generator`)
+            discriminatorModel.value.save(`localstorage://${epoch + 1}-discriminator`)
+        }
+    }
+}
+
+function generateMidiMatrix() {
+    const generatedData = generatorModel.predict(someInputNoise)
+    const scaledData = generatedData.mul(255)
+}
+
+function pickRandomElements(arr, n) {
+    let result = arr.slice()
+    for (let i = result.length - 1; i > 0; i--) {
+        // Generate random index
+        let j = Math.floor(Math.random() * (i + 1))
+        // Swap elements at indices i and j
+        [result[i], result[j]] = [result[j], result[i]]
+    }
+    // Return the first n elements
+    return result.slice(0, n)
 }
 </script>
 
@@ -122,15 +231,16 @@ function initializeModel() {
     <app-section title="Train">
         <div class="flex flex-row justify-between items-center mb-2">
             <h3 class="text-sm">Status</h3>
-            <el-button link bg size="small" @click="cancelAction = true" :disabled="!loading">Cancel Action</el-button>
         </div>
-            <div class="text-md rounded-md bg-gray-200 py-2 px-4 mb-2 font-mono whitespace-pre-line">{{ statusMessage }}</div>
+        <div class="text-md rounded-md bg-gray-900 text-green-400 py-2 px-4 mb-2 font-mono whitespace-pre-line">{{
+            statusMessage }}
+        </div>
 
         <h3 class="text-sm mt-6 mb-2">Actions</h3>
-        <el-button @click="loadData" :disabled="loading">Load Data</el-button>
-        <el-button @click="preprocessData" :disabled="loading">Process Data</el-button>
-        <el-button @click="initializeModel" :disabled="loading || !dataLoaded || !dataPreprocessed">Initialize Model</el-button>
-        <el-button :disabled="loading">Train Model</el-button>
+        <el-button @click="createTrainingData" :disabled="loading">Create training data</el-button>
+        <el-button @click="initializeModel" :disabled="loading">Initialize
+            Model</el-button>
+        <el-button :disabled="loading" @click="trainModel">Train Model</el-button>
         <el-button :disabled="loading">Save Model</el-button>
     </app-section>
 </template>
