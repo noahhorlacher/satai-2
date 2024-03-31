@@ -10,8 +10,14 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 
 statusMessage.value = 'Press an action button to begin...'
 
-const trainingDataUrl = '/data/midi/midi_all.zip'
 const dataPreprocessorBatchSize = 200
+
+const trainingZips = reactive([
+    { label: `midi-all.zip (49.7 MB) (14'718 files)`, value: 'midi-all.zip' },
+    { label: `midi-test-large.zip (4.54 MB) (1'881 files)`, value: 'midi-test-large.zip' },
+    { label: `midi-test-small.zip (80.6 KB) (45 files)`, value: 'midi-test-small.zip' },
+])
+const selectedTrainingDataUrl = ref(trainingZips[0].value)
 
 // load midi data
 // my midi files were already pre-processed to only have 1 track (track 0)
@@ -22,8 +28,8 @@ async function loadData() {
     midiFiles = []
 
     try {
-        statusMessage.value = 'Downloading midi files ZIP...'
-        const response = await fetch(trainingDataUrl)
+        statusMessage.value = `Downloading ${selectedTrainingDataUrl.value}...`
+        const response = await fetch(`/data/midi/${selectedTrainingDataUrl.value}`)
         const zipData = await response.blob()
         const jszip = new JSZip()
 
@@ -71,14 +77,14 @@ async function preprocessData() {
         const data = JSON.stringify(_preprocessedData)
         const gzipData = pako.gzip(data)
 
-        zipFile.file(`batch-${currentBatch}_of_${amountBatches}.json.gz`, gzipData)
+        zipFile.file(`batch-${currentBatch}-of-${amountBatches}_size-${batch.length}.json.gz`, gzipData)
     }
 
     // Compress the entire array of preprocessed data
     statusMessage.value = `Compressing all data`
     const zipData = await zipFile.generateAsync({ type: 'uint8array' })
 
-    exportTrainingData(zipData, 'SatAi-Training-Data')
+    exportTrainingData(zipData, `SatAi-Training-Data_${selectedTrainingDataUrl.value.split('/').pop().replace('.zip', '')}_batch-size-${dataPreprocessorBatchSize}_${amountBatches}-batches`)
 
     statusMessage.value = 'Preprocessing complete.'
     loading.value = false
@@ -240,11 +246,21 @@ function pickRandomElements(arr, n) {
             statusMessage }}
         </div>
 
-        <h3 class="text-sm mt-6 mb-2">Actions</h3>
-        <el-button @click="createTrainingData" :disabled="loading">Create training data</el-button>
-        <el-button @click="initializeModel" :disabled="loading">Initialize
-            Model</el-button>
-        <el-button :disabled="loading" @click="trainModel">Train Model</el-button>
-        <el-button :disabled="loading">Save Model</el-button>
+        <div>
+            <h3 class="text-sm mt-6 mb-2">Actions</h3>
+            <el-button @click="createTrainingData" :disabled="loading">Create training data</el-button>
+            <el-button @click="initializeModel" :disabled="loading">Initialize
+                Model</el-button>
+            <el-button :disabled="loading" @click="trainModel">Train Model</el-button>
+            <el-button :disabled="loading">Save Model</el-button>
+        </div>
+
+        <div>
+            <h3 class="text-sm mt-6 mb-2">Training Data to Process</h3>
+            <el-select v-model="selectedTrainingDataUrl" placeholder="Select Training Data ZIP" size="large">
+                <el-option v-for="item in trainingZips" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+        </div>
+
     </app-section>
 </template>

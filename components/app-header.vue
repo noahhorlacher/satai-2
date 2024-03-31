@@ -46,28 +46,13 @@ async function handleFileImport(event) {
             trainingData.value = []
 
             // Decompress the zip
-            const zip = new JSZip()
-            const zipData = await zip.loadAsync(e.target.result)
+            let zip = new JSZip()
+            let zipData = await zip.loadAsync(e.target.result)
+            zip = null
+            trainingData.value = zipData.files
+            zipData = null
 
-            let idx = 1
-            let filesAmount = Object.keys(zipData.files).length
-
-            // Unzip each gzip file
-            for (const [filename, file] of Object.entries(zipData.files)) {
-                statusMessage.value = `Unzipping batch ${idx++}/${filesAmount}\n(${filename})`
-
-                let gzipArchive = await file.async("arraybuffer")
-
-                // Decompress the gzipped data
-                let decompressedGzipArchive = pako.inflate(new Uint8Array(gzipArchive), { to: 'string' })
-                gzipArchive = null
-
-                let jsonData = JSON.parse(decompressedGzipArchive)
-                decompressedGzipArchive = null
-
-                trainingData.value.push(...jsonData)
-                jsonData = null
-            }
+            console.log('trainingData', trainingData.value)
 
             statusMessage.value = 'Training data imported successfully.'
         } catch (error) {
