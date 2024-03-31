@@ -10,7 +10,8 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 
 statusMessage.value = 'Press an action button to begin...'
 
-const dataPreprocessorBatchSize = 1000
+const trainingDataUrl = '/data/midi/midi_all.zip'
+const dataPreprocessorBatchSize = 200
 
 // load midi data
 // my midi files were already pre-processed to only have 1 track (track 0)
@@ -22,7 +23,7 @@ async function loadData() {
 
     try {
         statusMessage.value = 'Downloading midi files ZIP...'
-        const response = await fetch('/data/midi/midi_all.zip')
+        const response = await fetch(trainingDataUrl)
         const zipData = await response.blob()
         const jszip = new JSZip()
 
@@ -54,10 +55,11 @@ async function loadData() {
 // preprocess midi data for training
 async function preprocessData() {
     loading.value = true
-    let allData = [] // Array to collect all preprocessed data
 
     let batchSizes = dataPreprocessorBatchSize > 0 ? dataPreprocessorBatchSize : midiFiles.length
     const amountBatches = Math.ceil(midiFiles.length / batchSizes)
+
+    const zipFile = new JSZip()
 
     for (let i = 0; i < midiFiles.length; i += batchSizes) {
         const batch = midiFiles.slice(i, i + batchSizes)
@@ -65,16 +67,18 @@ async function preprocessData() {
         let currentBatch = i / batchSizes + 1
         const _preprocessedData = await MIDIPreprocessor.preprocess(batch, undefined, `${currentBatch} of ${amountBatches}`)
 
-        // Collect preprocessed data into a single array
-        allData.push(..._preprocessedData)
+        // download
+        const data = JSON.stringify(_preprocessedData)
+        const gzipData = pako.gzip(data)
+
+        zipFile.file(`batch-${currentBatch}_of_${amountBatches}.json.gz`, gzipData)
     }
 
     // Compress the entire array of preprocessed data
     statusMessage.value = `Compressing all data`
-    const data = JSON.stringify(allData)
-    const compressedData = pako.gzip(data)
+    const zipData = await zipFile.generateAsync({ type: 'uint8array' })
 
-    exportTrainingData(compressedData, 'SatAi-Training-Data')
+    exportTrainingData(zipData, 'SatAi-Training-Data')
 
     statusMessage.value = 'Preprocessing complete.'
     loading.value = false
@@ -88,11 +92,11 @@ async function createTrainingData() {
 function exportTrainingData(dataToExport, fileName) {
     statusMessage.value = `Downloading training data...`
 
-    const blob = new Blob([new Uint8Array(dataToExport)], { type: 'application/gzip' });
+    const blob = new Blob([dataToExport], { type: 'application/zip' });
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${fileName}.json.gz`
+    a.download = `${fileName}.zip`
     a.click()
     URL.revokeObjectURL(url)
     a.remove()

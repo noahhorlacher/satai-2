@@ -1,6 +1,7 @@
 <script setup lang="jsx">
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue'
 import pako from 'pako'
+import JSZip from 'jszip'
 
 const menu = {
     "Export": [
@@ -16,6 +17,7 @@ const menu = {
 }
 
 const { trainingData } = toRefs(useTrainingDataStore())
+const { statusMessage } = toRefs(useStatusMessageStore())
 
 function exportAsMIDI() {
     console.log('Exporting as MIDI...')
@@ -40,12 +42,36 @@ async function handleFileImport(event) {
 
     reader.onload = async (e) => {
         try {
-            const decompressed = pako.inflate(new Uint8Array(e.target.result), { to: 'string' })
-            const jsonData = JSON.parse(decompressed)
-            trainingData.value = jsonData // Assuming trainingData is a ref to your data store
-            console.log("Training data imported successfully.")
+            statusMessage.value = 'Importing training data...'
+            trainingData.value = []
+
+            // Decompress the zip
+            const zip = new JSZip()
+            const zipData = await zip.loadAsync(e.target.result)
+
+            let idx = 1
+            let filesAmount = Object.keys(zipData.files).length
+
+            // Unzip each gzip file
+            for (const [filename, file] of Object.entries(zipData.files)) {
+                statusMessage.value = `Unzipping batch ${idx++}/${filesAmount}\n(${filename})`
+
+                let gzipArchive = await file.async("arraybuffer")
+
+                // Decompress the gzipped data
+                let decompressedGzipArchive = pako.inflate(new Uint8Array(gzipArchive), { to: 'string' })
+                gzipArchive = null
+
+                let jsonData = JSON.parse(decompressedGzipArchive)
+                decompressedGzipArchive = null
+
+                trainingData.value.push(...jsonData)
+                jsonData = null
+            }
+
+            statusMessage.value = 'Training data imported successfully.'
         } catch (error) {
-            console.error("Error importing training data:", error)
+            statusMessage.value = `Error importing training data: ${error.message}`
         }
     }
 
@@ -68,7 +94,7 @@ function NavMenuItem(props, context) {
 <template>
     <div id="app-header" class="w-full z-10 h-fit relative py-2 px-8 bg-gray-50 shadow-md">
         <!-- Hidden file input -->
-        <input type="file" ref="fileInput" style="display: none" @change="handleFileImport" accept=".gz" />
+        <input type="file" ref="fileInput" style="display: none" @change="handleFileImport" accept=".zip" />
 
         <div class="flex flex-row justify-between items-center">
             <!-- App title -->
