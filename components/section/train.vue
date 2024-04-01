@@ -49,12 +49,12 @@ const selectedSamplesName = ref()
 
 let trainingData = []
 
-const discriminatorLearningRate = 0.0001
+const discriminatorLearningRate = 0.00015
 const ganLearningRate = 0.0001
 const clipValue = 0.01
 
-let epochs = 200
-let batchSize = 25
+let epochs = 600
+let batchSize = 32
 
 // epochs that save the model and generate previews
 const saveEpochs = [
@@ -62,7 +62,7 @@ const saveEpochs = [
 ]
 
 // for generating
-const midiConfidenceThreshold = 0.5
+const midiConfidenceThreshold = 0.1
 
 const trainedForEpochs = ref(0)
 
@@ -260,10 +260,11 @@ async function trainModel() {
 
         trainedForEpochs.value++
 
-        if (saveEpochs.includes(trainedForEpochs.value)) {
-            console.log('saving')
+        if (trainedForEpochs.value % 100 == 0) {
             chartOptions.xaxis.categories.push(`Epoch ${i}`)
+        }
 
+        if (saveEpochs.includes(trainedForEpochs.value)) {
             previewCanvas()
         }
 
@@ -453,6 +454,51 @@ function previewCanvas() {
     busy.value = false
 }
 
+async function previewSample() {
+    busy.value = true
+
+    const sample = await getRandomSamples(1)
+
+    const ctx = canvasPreview.value.getContext('2d')
+    ctx.imageSmoothingEnabled = false
+
+    ctx.clearRect(0, 0, 64, 64)
+
+    const imageData = ctx.createImageData(64, 64)
+
+    // loop over each pixel and set pixel brightness to the generated data$
+    for (let y = 0; y < sample[0].length; y++) {
+        for (let x = 0; x < sample[0][y].length; x++) {
+            let value = sample[0][y][x]
+            const pixelIndex = (y * 64 + x) * 4
+
+            // threshold
+            if (value < midiConfidenceThreshold) {
+                value = 0
+            }
+
+            // draw
+            imageData.data[pixelIndex] = Math.round(value * 255)
+            imageData.data[pixelIndex + 1] = Math.round(value * 255)
+            imageData.data[pixelIndex + 2] = Math.round(value * 255)
+
+            imageData.data[pixelIndex + 3] = 255
+        }
+    }
+
+    // update canvas with new image data
+    ctx.putImageData(imageData, 0, 0)
+    canvasPreview.value.toBlob((blob) => {
+        const url = URL.createObjectURL(blob)
+        previewImages.value.push({
+            description: `Sample preview`,
+            src: url
+        })
+    })
+
+    busy.value = false
+}
+
 function nextSave() {
     const nextSaveEpoch = saveEpochs.find(epoch => epoch > trainedForEpochs.value)
     return nextSaveEpoch || 'None'
@@ -535,6 +581,9 @@ function nextSave() {
             <el-button @click="previewCanvas" :disabled="busy">
                 Preview Image
             </el-button>
+            <el-button @click="previewSample" :disabled="busy">
+                Preview Sample
+            </el-button>
         </div>
 
         <div>
@@ -544,7 +593,7 @@ function nextSave() {
                 No previews available. Train or click "Preview Image" to generate previews.
             </div>
 
-            <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
+            <div class="flex flex-row-reverse flex-wrap mt-8 gap-4 justify-center">
                 <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/4 h-auto">
                     <figcaption class="text-xs mb-2">{{ previewImage.description }}</figcaption>
                     <img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
