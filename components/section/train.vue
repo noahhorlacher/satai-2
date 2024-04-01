@@ -217,6 +217,8 @@ async function trainModel() {
     for (let i = 0; i < epochs; i++) {
         let realImagesArray = await getRandomSamples(batchSize)
 
+        console.log('randomSamples', realImagesArray)
+
         // Convert each 2D image in the array to a 3D image by adding an extra dimension
         realImagesArray = realImagesArray.map(image => {
             return image.map(row => {
@@ -351,53 +353,60 @@ async function handleFileImport(event) {
 }
 
 function generateMIDI() {
-    busy.value = true
+    busy.value = true;
 
-    const noise = tf.randomNormal([1, 100])
-    const generatedData = generator.predict(noise)
-    let data = generatedData.arraySync()
-    data = data[0]
+    const noise = tf.randomNormal([1, 100]);
+    const generatedData = generator.predict(noise);
+    let data = generatedData.arraySync();
+    data = data[0];
     data = data.map(row => {
         return row.map(value => {
-            return value[0] // remove unnecessary dimension
-        })
-    })
+            return value[0]; // remove unnecessary dimension
+        });
+    });
 
-    // Convert the data to a MIDI files
-    const midi = new Midi()
+    // Convert the data to a MIDI file
+    const midi = new Midi();
 
     // Add a track
-    const track = midi.addTrack()
+    const track = midi.addTrack();
+
+    // Assuming dimensions and startOctave are available from your preprocessing settings
+    const dimensions = 64;
+    const startOctave = 3;
 
     for (let y = 0; y < data.length; y++) {
         for (let x = 0; x < data[y].length; x++) {
-            // clamp 
-            const velocity = Math.max(0, Math.min(1.0, data[y][x][0]))
+            const velocity = Math.max(0, Math.min(1.0, data[y][x]));
+            if (velocity < midiConfidenceThreshold) continue;
 
-            if (velocity < midiConfidenceThreshold) return
+            const midiNumber = y + (startOctave * 12); // Calculate MIDI note number
+            const time = x / dimensions; // Time in beats (assuming 1 beat per dimension)
+            const duration = 1 / dimensions; // Duration in beats
 
             track.addNote({
-                midi: y + 36, // startOctave = 3
-                time: x,
-                duration: 100,
+                midi: midiNumber,
+                time: time,
+                duration: duration,
                 velocity: velocity
-            })
+            });
         }
     }
 
     // Convert the MIDI to a blob
-    const blob = new Blob([midi.toArray()], { type: 'audio/midi' })
+    const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
 
     // Download the blob
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'generated.mid'
-    a.click()
-    a.remove()
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'generated.mid';
+    a.click();
+    a.remove();
 
-    busy.value = false
+    busy.value = false;
 }
+
 
 const canvasPreview = ref()
 const previewImages = ref([])
@@ -445,7 +454,7 @@ function previewCanvas() {
     ctx.putImageData(imageData, 0, 0)
     canvasPreview.value.toBlob((blob) => {
         const url = URL.createObjectURL(blob)
-        previewImages.value.push({
+        previewImages.value.unshift({
             description: `${trainedForEpochs.value} Epochs`,
             src: url
         })
@@ -515,6 +524,13 @@ async function previewSample() {
 function nextSave() {
     const nextSaveEpoch = saveEpochs.find(epoch => epoch > trainedForEpochs.value)
     return nextSaveEpoch || 'None'
+}
+
+// download both models
+async function saveModel() {
+    const discriminatorModelSaveResult = await discriminator.save(`downloads://discriminator-model-${trainedForEpochs.value}-epochs`)
+    const generatorModelSaveResult = await generator.save(`downloads://generator-model-${trainedForEpochs.value}-epochs`)
+    const ganModelSaveResult = await gan.save(`downloads://gan-model-${trainedForEpochs.value}-epochs`)
 }
 </script>
 
@@ -597,6 +613,9 @@ function nextSave() {
             <el-button @click="previewSample" :disabled="busy">
                 Preview Sample
             </el-button>
+            <el-button @click="saveModel" :disabled="busy">
+                Save Model
+            </el-button>
         </div>
 
         <div>
@@ -606,7 +625,7 @@ function nextSave() {
                 No previews available. Train or click "Preview Image" to generate previews.
             </div>
 
-            <div class="flex flex-row-reverse flex-wrap mt-8 gap-4 justify-center">
+            <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
                 <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/4 h-auto">
                     <figcaption class="text-xs mb-2">{{ previewImage.description }}</figcaption>
                     <img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
