@@ -53,7 +53,7 @@ async function preprocessData() {
 
     exportTrainingData(zipData, `SatAi-Training-Data_${loadedUnprocessedName.value}_batch-size-${dataPreprocessorBatchSize}_${amountBatches}-batches_amount-samples-${amountSamples}`)
 
-    statusMessage.value = `Preprocessing complete. Final sample size: ${amountSamples}`
+    statusMessage.value = `Preprocessing complete. Final amount of samples: ${amountSamples}`
     busy.value = false
 }
 
