@@ -214,33 +214,33 @@ async function trainModel() {
     let backend = tf.getBackend()
     trainingStartDateTime = new Date()
 
+    let realImagesArray
+
     for (let i = 0; i < epochs; i++) {
-        let realImagesArray = await getRandomSamples(batchSize)
+        try {
+            realImagesArray = await getRandomSamples(batchSize)
 
-        console.log('randomSamples', realImagesArray)
-
-        // Convert each 2D image in the array to a 3D image by adding an extra dimension
-        realImagesArray = realImagesArray.map(image => {
-            return image.map(row => {
-                return row.map(value => {
-                    return [value] // Adds an extra dimension
+            // Convert each 2D image in the array to a 3D image by adding an extra dimension
+            realImagesArray = realImagesArray.map(image => {
+                return image.map(row => {
+                    return row.map(value => {
+                        return [value] // Adds an extra dimension
+                    })
                 })
             })
-        })
 
-        const realImages = tf.tensor4d(realImagesArray, [batchSize, 64, 64, 1]);
+            const realImages = tf.tensor4d(realImagesArray, [batchSize, 64, 64, 1]);
 
-        // Check if the conversion is correct
-        // Generate a batch of fake images.
-        const noise = tf.randomNormal([batchSize, 100])
-        const fakeImages = generator.predict(noise)
+            // Check if the conversion is correct
+            // Generate a batch of fake images.
+            const noise = tf.randomNormal([batchSize, 100])
+            const fakeImages = generator.predict(noise)
 
-        // Create a batch of labels for the real and fake images.
-        // With label smoothing
-        const realLabels = tf.ones([batchSize, 1]).mul(0.9)
-        const fakeLabels = tf.zeros([batchSize, 1]).mul(0.1)
+            // Create a batch of labels for the real and fake images.
+            // With label smoothing
+            const realLabels = tf.ones([batchSize, 1]).mul(0.9)
+            const fakeLabels = tf.zeros([batchSize, 1]).mul(0.1)
 
-        try {
             // Train the discriminator on real and fake images
             let dLossReal = await discriminator.trainOnBatch(realImages, realLabels)
             let dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels)
@@ -257,6 +257,7 @@ async function trainModel() {
             statusMessage.value = `💡 Using backend [${backend}] to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
         } catch (error) {
             console.error('Error training:', error)
+            console.log('the samples in question', realImagesArray)
             statusMessage.value = 'Error training. Check console'
         }
 
