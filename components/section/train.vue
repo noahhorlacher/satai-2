@@ -457,7 +457,20 @@ function previewCanvas() {
 async function previewSample() {
     busy.value = true
 
-    const sample = await getRandomSamples(1)
+    currentLoadedSampleBatch.batchName = trainingData[Math.floor(Math.random() * trainingData.length)]
+    currentLoadedSampleBatch.timesLoaded = 0
+
+    let fileData = trainingData[Math.floor(Math.random() * trainingData.length)]
+
+    let unzippedData = await pako.ungzip(fileData)
+    fileData = null
+
+    let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
+    unzippedData = null
+
+    // get random element from trainingData
+    const randomIndex = Math.floor(Math.random() * arrays.length)
+    const randomSample = arrays[randomIndex]
 
     const ctx = canvasPreview.value.getContext('2d')
     ctx.imageSmoothingEnabled = false
@@ -467,9 +480,9 @@ async function previewSample() {
     const imageData = ctx.createImageData(64, 64)
 
     // loop over each pixel and set pixel brightness to the generated data$
-    for (let y = 0; y < sample[0].length; y++) {
-        for (let x = 0; x < sample[0][y].length; x++) {
-            let value = sample[0][y][x]
+    for (let y = 0; y < randomSample.length; y++) {
+        for (let x = 0; x < randomSample[y].length; x++) {
+            let value = randomSample[y][x]
             const pixelIndex = (y * 64 + x) * 4
 
             // threshold

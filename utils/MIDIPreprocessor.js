@@ -1,4 +1,3 @@
-import { norm } from '@tensorflow/tfjs'
 import { Midi } from '@tonejs/midi'
 
 const pitches = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
@@ -15,9 +14,9 @@ export default class MIDIPreprocessor {
     static async preprocess(midiFiles = [], options = {
         dimensions: 64,
         startOctave: 3,
-        horizontalResolution: 1 / 8,
+        horizontalResolution: 1 / 16,
         stepSizeX: 1,
-        transpositions: [-7, -5, 2, 7],
+        transpositions: [],
         minimumNotes: 6
     }, batchProgress) {
         const { statusMessage } = toRefs(useStatusMessageStore())
@@ -83,130 +82,97 @@ export default class MIDIPreprocessor {
 
     static async processSingleMidi(midiArrayBuffer, options) {
         const dimensions = options.dimensions;
-        const quantization = options.horizontalResolution;
-        const startOctave = options.startOctave;
-        const stepSizeX = options.stepSizeX;
-        const transpositions = options.transpositions;
-
-        let processedMidiMatrices = []
+        let processedMidiMatrices = [];
 
         try {
-            const midiBlobUri = URL.createObjectURL(new Blob([midiArrayBuffer], { type: 'audio/midi' }))
-            const midiData = await Midi.fromUrl(midiBlobUri)
-
-            // filter out non-chromatic instruments
-            midiData.tracks = midiData.tracks.filter(track => chromaticInstruments.includes(track.instrument.number + 1))
-
-
-            // select the track with the most notes
-            let maxNotes = 0;
-            let maxNotesTrack = null;
-
-            for (let i = 0; i < midiData.tracks.length; i++) {
-                if (midiData.tracks[i].notes.length > maxNotes) {
-                    maxNotes = midiData.tracks[i].notes.length;
-                    maxNotesTrack = midiData.tracks[i];
-                }
-            }
-
-            midiData.tracks = [maxNotesTrack];
-
-            // quantize midi file
-            const quantizedNotes = MIDIPreprocessor.quantizeNotes(midiData, quantization)
-            if (!quantizedNotes) return false
-            midiData.tracks[0].notes = quantizedNotes
+            const midiBlobUri = URL.createObjectURL(new Blob([midiArrayBuffer], { type: 'audio/midi' }));
+            const midiData = await Midi.fromUrl(midiBlobUri);
 
             const PPQ = midiData.header.ppq;
-
             const timeSignatures = midiData.header.timeSignatures || [[4, 4]];
-            const timeSignature = timeSignatures.length > 0 ? timeSignatures[0] : [4, 4]; // assuming first time signature is used throughout
-            const barLengthTicks = (timeSignature[0] / timeSignature[1]) * PPQ * 4; // Length of a bar in ticks for 4/4 time
+            const timeSignature = timeSignatures[0] || [4, 4]
+            const ticksPerMeasure = (timeSignature[0] / timeSignature[1]) * PPQ * 4;
 
-            // for each step on x axis
-            for (let currentTick = 0; currentTick < midiData.durationTicks; currentTick += barLengthTicks * stepSizeX) {
-                let barEndTick = currentTick + barLengthTicks * stepSizeX;
+            for (let track of midiData.tracks) {
+                if (chromaticInstruments.includes(track.instrument.number)) {
+                    track.notes.forEach(note => {
+                        const startMeasure = Math.floor(note.ticks / ticksPerMeasure);
+                        const endMeasure = Math.floor((note.ticks + note.durationTicks) / ticksPerMeasure);
 
-                const midiSegmentNotes = MIDIPreprocessor.sliceMidi(midiData, currentTick, barEndTick);
+                        for (let measure = startMeasure; measure <= endMeasure; measure++) {
+                            if (!processedMidiMatrices[measure]) {
+                                processedMidiMatrices[measure] = MIDIPreprocessor.createEmptyMatrix(dimensions);
+                            }
+                            const startTick = note.ticks - (measure * ticksPerMeasure);
+                            const endTick = (note.ticks + note.durationTicks) - (measure * ticksPerMeasure);
 
-                // create image with transposition 0
-                const normalMidiMatrix = await MIDIPreprocessor.createMidiMatrix(midiSegmentNotes, dimensions, startOctave, PPQ);
-
-                if (
-                    MIDIPreprocessor.sampleHasCorrectAmountColumns(normalMidiMatrix)
-                    && MIDIPreprocessor.sampleHasCorrectAmountRows(normalMidiMatrix)
-                ) {
-                    if (MIDIPreprocessor.sampleHasMinimumNotes(normalMidiMatrix, options.minimumNotes)) {
-                        processedMidiMatrices.push(normalMidiMatrix)
-                    }
-
-                    // create transpositions
-                    for (let transposition of transpositions) {
-                        const transposedSegmentNotes = MIDIPreprocessor.transposeNotes(midiSegmentNotes, transposition);
-                        const midiMatrix = await MIDIPreprocessor.createMidiMatrix(transposedSegmentNotes, dimensions, startOctave, PPQ);
-
-                        if (MIDIPreprocessor.sampleHasCorrectAmountColumns(midiMatrix)
-                            && MIDIPreprocessor.sampleHasCorrectAmountRows(midiMatrix)
-                            && MIDIPreprocessor.sampleHasMinimumNotes(midiMatrix, options.minimumNotes)) {
-                            processedMidiMatrices.push(midiMatrix)
+                            MIDIPreprocessor.fillMatrix(processedMidiMatrices[measure], startTick, endTick, note.midi, note.velocity, ticksPerMeasure, dimensions);
                         }
-                    }
-                } else {
-                    throw 'Error: Matrix is faulty.'
+                    });
                 }
             }
         } catch (e) {
-            console.error(e)
+            console.error(e);
         }
 
-        return processedMidiMatrices
+        return processedMidiMatrices.filter(matrix => matrix.some(row => row.some(val => val !== 0)));
     }
 
+    static createEmptyMatrix(dimensions) {
+        return new Array(dimensions).fill().map(() => new Array(dimensions).fill(0));
+    }
 
+    static fillMatrix(matrix, startTick, endTick, midiNote, velocity, ticksPerMeasure, dimensions) {
+        const pitchIndex = midiNote % dimensions;
+        const startIdx = Math.floor(startTick / ticksPerMeasure * matrix[0].length);
+        const endIdx = Math.ceil(endTick / ticksPerMeasure * matrix[0].length);
+
+        for (let x = startIdx; x < endIdx && x < matrix[0].length; x++) {
+            matrix[pitchIndex][x] = Math.round(velocity * 127); // Adjust as per required scaling
+        }
+    }
+
+    // Improved quantization logic
     static quantizeNotes(midiData, quantization) {
-        // Adjust midi note start times and durations to the nearest quantization step
-        const PPQ = midiData.header.ppq
-        const quantizationStep = PPQ / ((1 / quantization) / 4)
-        let newNotes = []
+        const PPQ = midiData.header.ppq;
+        const quantizationStep = PPQ / ((1 / quantization) / 4);
+        let newNotes = [];
 
-        if (!midiData.tracks[0]) return false
+        if (!midiData.tracks[0]) return false;
 
         for (const note of midiData.tracks[0].notes) {
-            // convert duration to ticks
-            const durationInTicks = note.duration * PPQ
-
-            // quantize
-            const quantizedStartTime = Math.floor(note.ticks / quantizationStep) * quantizationStep
-            const quantizedEndTime = Math.floor((note.ticks + durationInTicks) / quantizationStep) * quantizationStep
-
-            // calculate new duration and convert back to seconds
-            const quantizedDuration = (quantizedEndTime - quantizedStartTime) / PPQ
+            const quantizedStartTime = Math.round(note.ticks / quantizationStep) * quantizationStep;
+            const quantizedEndTime = Math.round((note.ticks + note.durationTicks) / quantizationStep) * quantizationStep;
+            const quantizedDuration = (quantizedEndTime - quantizedStartTime) / PPQ;
 
             newNotes.push({
                 ...note,
                 time: quantizedStartTime / PPQ,
                 ticks: quantizedStartTime,
                 duration: quantizedDuration
-            })
+            });
         }
 
-        return newNotes
+        return newNotes;
     }
 
+    // Enhanced matrix generation logic
     static async createMidiMatrix(midiDataNotes, dimensions, startOctave, ppq) {
-        // Create the matrix array
-        const midiMatrix = Array.from({ length: dimensions }, () => new Array(dimensions).fill(0))
+        const midiMatrix = Array.from({ length: dimensions }, () => new Array(dimensions).fill(0));
 
-        // Loop through each note and update image matrix
         midiDataNotes.forEach(note => {
-            const x = Math.floor(note.time / ppq * dimensions) // Calculate x coordinate
-            const y = (note.midi - (startOctave * 12)) % dimensions // Calculate y coordinate
+            const xStart = Math.floor(note.time * ppq * dimensions);
+            const xEnd = Math.floor((note.time + note.duration) * ppq * dimensions);
+            const y = (note.midi - (startOctave * 12)) % dimensions;
 
-            if (y >= 0 && y <= dimensions - 1) {
-                midiMatrix[y][x] = note.velocity
+            if (y >= 0 && y < dimensions) {
+                for (let x = xStart; x < xEnd && x < dimensions; x++) {
+                    midiMatrix[y][x] = Math.max(midiMatrix[y][x], note.velocity);
+                }
             }
-        })
+        });
 
-        return midiMatrix
+        return midiMatrix;
     }
 
     static transposeNotes(midiDataNotes, semitoneShift) {
