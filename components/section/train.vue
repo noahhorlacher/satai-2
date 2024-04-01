@@ -15,7 +15,7 @@ const busy = ref(false)
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
 
-const midiVelocityThreshold = 0.1
+const midiVelocityThreshold = 0.3
 
 const chartOptions = reactive({
     chart: {
@@ -49,14 +49,15 @@ const discriminatorLearningRate = 0.0001
 const ganLearningRate = 0.0001
 const clipValue = 0.01
 
-let epochs = 200
-const batchSize = 20
+let epochs = 10000
+let batchSize = 200
 
 const trainedForEpochs = ref(0)
 
-const discriminator = tf.sequential();
+const discriminator = tf.sequential()
 
-const epochsSelection = ref(200)
+const epochsSelection = ref(epochs)
+const batchSizeSelection = ref(batchSize)
 
 // First Convolutional layer - Assuming a larger kernel and stride to reduce dimension significantly
 discriminator.add(tf.layers.conv2d({
@@ -195,6 +196,7 @@ async function trainModel() {
     statusMessage.value = 'Starting training...'
 
     epochs = epochsSelection.value
+    batchSize = batchSizeSelection.value
 
     busy.value = true
     let backend = tf.getBackend()
@@ -325,7 +327,8 @@ function generate() {
 
     const noise = tf.randomNormal([1, 100])
     const generatedData = generator.predict(noise)
-    const data = generatedData.arraySync()
+    let data = generatedData.arraySync()
+    data = data[0]
 
     // Convert the data to a MIDI files
     const midi = new Midi()
@@ -335,11 +338,10 @@ function generate() {
 
     console.log('data', data)
 
-    // Add notes
-    data[0].forEach((row, rowIndex) => {
-        row.forEach((value, columnIndex) => {
+    for (let i = 0; i < data.length; i++) {
+        for (let j = 0; j < data[i].length; j++) {
             // clamp 
-            const velocity = Math.max(0, Math.min(1.0, value))
+            const velocity = Math.max(0, Math.min(1.0, data[i][j][0]))
 
             if (velocity < midiVelocityThreshold) return
 
@@ -349,8 +351,8 @@ function generate() {
                 duration: 100,
                 velocity: velocity
             })
-        })
-    })
+        }
+    }
 
     // Convert the MIDI to a blob
     const blob = new Blob([midi.toArray()], { type: 'audio/midi' })
@@ -373,8 +375,10 @@ function generate() {
         <div class="flex flex-row justify-between items-center mb-2">
             <h3 class="text-sm">Status</h3>
         </div>
-        <div class="text-md rounded-md bg-gray-900 text-green-400 py-2 px-4 mb-2 font-mono whitespace-pre-line">{{
-            statusMessage }}
+        <div
+            class="text-md rounded-md shadow-md bg-gray-900 text-green-400 py-2 px-4 mb-2 font-mono whitespace-pre-line">
+            {{
+                statusMessage }}
         </div>
 
         <div>
@@ -404,10 +408,24 @@ function generate() {
 
         <h3 class="text-sm mt-6 mb-2">Train</h3>
         <div class="flex flex-row gap-x-4 mb-4">
-            <el-input-number :disabled="!trainingData || trainingData.length == 0 || busy" v-model="epochsSelection" />
             <el-button @click="trainModel" :disabled="!trainingData || trainingData.length == 0 || busy">
                 Train Model
             </el-button>
+        </div>
+
+        <h3 class="text-sm mt-6 mb-2">Training Settings</h3>
+        <div class="flex flex-row gap-x-4 mb-4">
+            <div>
+                <p class="text-xs mb-1">Epochs</p>
+                <el-input-number :disabled="!trainingData || trainingData.length == 0 || busy"
+                    v-model="epochsSelection" />
+            </div>
+
+            <div>
+                <p class="text-xs mb-1">Batch Size</p>
+                <el-input-number :disabled="!trainingData || trainingData.length == 0 || busy"
+                    v-model="batchSizeSelection" />
+            </div>
         </div>
 
         <h3 class="text-sm mt-6 mb-2">Test model</h3>

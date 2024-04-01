@@ -16,8 +16,8 @@ export default class MIDIPreprocessor {
         dimensions: 64,
         startOctave: 3,
         horizontalResolution: 1 / 8,
-        stepSizeX: 2,
-        transpositions: [+5],
+        stepSizeX: 1,
+        transpositions: [-9, -7, -5, -2, 2, 5, 7, 9],
         minimumNotes: 6
     }, batchProgress) {
         const { statusMessage } = toRefs(useStatusMessageStore())
@@ -51,8 +51,8 @@ export default class MIDIPreprocessor {
         let result = sample.length == 64
 
         if (!result) {
-            console.log('Sample does not have correct amount of rows')
-            console.log(sample, sample.length)
+            // console.log('Sample does not have correct amount of rows')
+            // console.log(sample, sample.length)
         }
 
         return result
@@ -62,8 +62,8 @@ export default class MIDIPreprocessor {
         let result = sample.every(row => row.length == 64)
 
         if (!result) {
-            console.log('Sample does not have correct amount of columns.')
-            console.log(sample)
+            // console.log('Sample does not have correct amount of columns.')
+            // console.log(sample)
         }
 
         return result
@@ -134,15 +134,21 @@ export default class MIDIPreprocessor {
                 if (
                     MIDIPreprocessor.sampleHasCorrectAmountColumns(normalMidiMatrix)
                     && MIDIPreprocessor.sampleHasCorrectAmountRows(normalMidiMatrix)
-                    && MIDIPreprocessor.sampleHasMinimumNotes(normalMidiMatrix, options.minimumNotes)
                 ) {
-                    processedMidiMatrices.push(normalMidiMatrix)
+                    if (MIDIPreprocessor.sampleHasMinimumNotes(normalMidiMatrix, options.minimumNotes)) {
+                        processedMidiMatrices.push(normalMidiMatrix)
+                    }
 
                     // create transpositions
                     for (let transposition of transpositions) {
                         const transposedSegmentNotes = MIDIPreprocessor.transposeNotes(midiSegmentNotes, transposition);
                         const midiMatrix = await MIDIPreprocessor.createMidiMatrix(transposedSegmentNotes, dimensions, startOctave, PPQ);
-                        processedMidiMatrices.push(midiMatrix);
+
+                        if (MIDIPreprocessor.sampleHasCorrectAmountColumns(midiMatrix)
+                            && MIDIPreprocessor.sampleHasCorrectAmountRows(midiMatrix)
+                            && MIDIPreprocessor.sampleHasMinimumNotes(midiMatrix, options.minimumNotes)) {
+                            processedMidiMatrices.push(midiMatrix)
+                        }
                     }
                 } else {
                     throw 'Error: Matrix is faulty.'
