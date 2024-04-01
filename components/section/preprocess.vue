@@ -18,7 +18,7 @@ const loadedUnprocessedData = ref()
 // load midi data
 let midiFiles = []
 async function createTrainingData() {
-    await loadData()
+    await loadUnprocessedData()
     await preprocessData()
 }
 
@@ -58,7 +58,7 @@ async function preprocessData() {
 }
 
 // load the midi files
-async function loadData() {
+async function loadUnprocessedData() {
     busy.value = true
 
     midiFiles = []
