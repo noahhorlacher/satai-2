@@ -5,12 +5,11 @@ import pako from 'pako'
 const busy = ref(false)
 const { statusMessage } = toRefs(useStatusMessageStore())
 
-const selectedUnprocessed = ref()
 const fileInput = ref()
 
 statusMessage.value = 'Press an action button to begin...'
 
-const dataPreprocessorBatchSize = 400
+const dataPreprocessorBatchSize = 100 // how many midi files (not samples) per batch
 
 const loadedUnprocessedName = ref()
 const loadedUnprocessedData = ref()

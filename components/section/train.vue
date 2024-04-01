@@ -17,6 +17,15 @@ const busy = ref(false)
 
 const midiVelocityThreshold = 0.3
 
+// While training, reuse the same batch of samples to pick randomly from for a few epochs
+// so the amount of ungzipping is reduced
+const pickNewBatchEveryNEpochs = 50
+const currentLoadedSampleBatch = {
+    batchName: '',
+    timesLoaded: pickNewBatchEveryNEpochs,
+    data: []
+}
+
 const chartOptions = reactive({
     chart: {
         type: 'line'
@@ -49,8 +58,8 @@ const discriminatorLearningRate = 0.0001
 const ganLearningRate = 0.0001
 const clipValue = 0.01
 
-let epochs = 10000
-let batchSize = 200
+let epochs = 200
+let batchSize = 25
 
 const trainedForEpochs = ref(0)
 
@@ -205,17 +214,16 @@ async function trainModel() {
     for (let i = 0; i < epochs; i++) {
         chartOptions.xaxis.categories.push(`Epoch ${i}`)
 
-        let realImagesArray = getRandomSamples(batchSize)
-
+        let realImagesArray = await getRandomSamples(batchSize)
 
         // Convert each 2D image in the array to a 3D image by adding an extra dimension
         realImagesArray = realImagesArray.map(image => {
             return image.map(row => {
                 return row.map(value => {
-                    return [value]; // Adds an extra dimension
-                });
-            });
-        });
+                    return [value] // Adds an extra dimension
+                })
+            })
+        })
 
         const realImages = tf.tensor4d(realImagesArray, [batchSize, 64, 64, 1]);
 
@@ -243,7 +251,7 @@ async function trainModel() {
             chartSeries[0].data.push(gLoss.toFixed(5))
             chartSeries[1].data.push(dLoss.toFixed(5))
 
-            statusMessage.value = `💡 Using the backend ${backend} to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
+            statusMessage.value = `💡 Using backend [${backend}] to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
         } catch (error) {
             console.error('Error training:', error)
             statusMessage.value = 'Error training. Check console'
@@ -258,18 +266,36 @@ async function trainModel() {
     statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`
 }
 
-function getRandomSamples(n) {
+async function getRandomSamples(n) {
     // Ensure trainingData is not empty
     if (!trainingData || trainingData.length === 0) {
         console.error("No training data available")
         return []
     }
 
+    // pick a random batch if batch has been reused enough
+    if (currentLoadedSampleBatch.timesLoaded >= pickNewBatchEveryNEpochs) {
+        statusMessage.value = 'Picking a new batch of samples...'
+        currentLoadedSampleBatch.batchName = trainingData[Math.floor(Math.random() * trainingData.length)]
+        currentLoadedSampleBatch.timesLoaded = 0
+
+        let fileData = trainingData[Math.floor(Math.random() * trainingData.length)]
+
+        let unzippedData = await pako.ungzip(fileData)
+        fileData = null
+
+
+        let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
+        unzippedData = null
+
+        currentLoadedSampleBatch.data = arrays
+    }
+
     // get n random elements from trainingData
     const result = []
     for (let i = 0; i < n; i++) {
         const randomIndex = Math.floor(Math.random() * trainingData.length)
-        result.push(trainingData[randomIndex])
+        result.push(currentLoadedSampleBatch.data[randomIndex])
     }
 
     return result
@@ -294,19 +320,11 @@ async function handleFileImport(event) {
             let zipData = await zip.loadAsync(e.target.result)
             zip = null
 
+            // load gzipped batches into trainingData array
             for (const filename of Object.keys(zipData.files)) {
                 statusMessage.value = `Unzipping ${filename}...`
                 let fileData = await zipData.files[filename].async('uint8array')
-
-                let unzippedData = pako.ungzip(fileData)
-                fileData = null
-
-                let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
-                unzippedData = null
-
-                trainingData.push(...arrays)
-
-                arrays = null
+                trainingData.push(fileData)
             }
 
             zipData = null
