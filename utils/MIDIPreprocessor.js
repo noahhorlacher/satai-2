@@ -47,6 +47,40 @@ export default class MIDIPreprocessor {
         return finalMidiMatrices
     }
 
+    static sampleHasCorrectAmountRows(sample) {
+        let result = sample.length == 64
+
+        if (!result) {
+            console.log('Sample does not have correct amount of rows')
+            console.log(sample, sample.length)
+        }
+
+        return result
+    }
+
+    static sampleHasCorrectAmountColumns(sample) {
+        let result = sample.every(row => row.length == 64)
+
+        if (!result) {
+            console.log('Sample does not have correct amount of columns.')
+            console.log(sample)
+        }
+
+        return result
+    }
+
+    static sampleHasMinimumNotes(sample, minimumNotes) {
+        let amountNotes = sample.reduce((acc, row) => acc + row.reduce((acc2, note) => acc2 + (note > 0 ? 1 : 0), 0), 0)
+        let result = amountNotes > minimumNotes
+
+        if (!result) {
+            // shut the hell up
+            // console.log(`Sample has ${amountNotes} notes but needs at least ${minimumNotes}.`)
+        }
+
+        return result
+    }
+
     static async processSingleMidi(midiArrayBuffer, options) {
         const dimensions = options.dimensions;
         const quantization = options.horizontalResolution;
@@ -96,29 +130,23 @@ export default class MIDIPreprocessor {
 
                 // create image with transposition 0
                 const normalMidiMatrix = await MIDIPreprocessor.createMidiMatrix(midiSegmentNotes, dimensions, startOctave, PPQ);
-                let isCorrectSize = normalMidiMatrix.length == 64 && normalMidiMatrix[0].length == 64
-                let amountNotes = normalMidiMatrix.reduce((acc, row) => acc + row.reduce((acc2, note) => acc + (note > 0 ? 1 : 0), 0), 0)
-                let hasAtLeastMinimumNotes = amountNotes >= options.minimumNotes
 
-                if (isCorrectSize && hasAtLeastMinimumNotes) {
+                if (
+                    MIDIPreprocessor.sampleHasCorrectAmountColumns(normalMidiMatrix)
+                    && MIDIPreprocessor.sampleHasCorrectAmountRows(normalMidiMatrix)
+                    && MIDIPreprocessor.sampleHasMinimumNotes(normalMidiMatrix, options.minimumNotes)
+                ) {
                     processedMidiMatrices.push(normalMidiMatrix)
-                } else {
-                    if (!isCorrectSize) {
-                        throw 'Error: Matrix is not 64x64.'
-                    } else if (!hasAtLeastMinimumNotes) {
-                        throw `Error: Matrix has ${amountNotes} notes but needs at least ${options.minimumNotes}.`
-                    }
-                }
 
-                if (normalMidiMatrix.some) {
-                    continue
-                } else
-
+                    // create transpositions
                     for (let transposition of transpositions) {
                         const transposedSegmentNotes = MIDIPreprocessor.transposeNotes(midiSegmentNotes, transposition);
                         const midiMatrix = await MIDIPreprocessor.createMidiMatrix(transposedSegmentNotes, dimensions, startOctave, PPQ);
                         processedMidiMatrices.push(midiMatrix);
                     }
+                } else {
+                    throw 'Error: Matrix is faulty.'
+                }
             }
         } catch (e) {
             console.error(e)

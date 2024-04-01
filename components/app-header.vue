@@ -1,6 +1,13 @@
 <script setup lang="jsx">
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue'
 
+let links = [
+    { label: 'Home', url: '/', icon: 'material-symbols:house-outline' },
+    { label: 'Preprocess', url: '/preprocess', icon: 'carbon:ibm-event-processing' },
+    { label: 'Train', url: '/train', icon: 'carbon:machine-learning' },
+    { label: 'Generate', url: '/generate', icon: 'material-symbols:music-note' },
+]
+
 const menu = {
     "Export": [
         { label: 'as MIDI', icon: 'mdi:export', action: exportAsMIDI },
@@ -17,6 +24,19 @@ function exportAsMIDI() {
 
 function exportAsWAV() {
     console.log('Exporting as WAV...')
+}
+
+function NavMenuLink(props, context) {
+    return <MenuItem>
+        <div class="w-full">
+            <nuxt-link to={props.link.url}>
+                <el-button class="w-full" style="justify-content: start;" text>
+                    <icon class="mr-2" name={props.link.icon} size="1.5em" />
+                    {props.link.label}
+                </el-button>
+            </nuxt-link>
+        </div>
+    </MenuItem>
 }
 
 function NavMenuItem(props, context) {
@@ -57,6 +77,12 @@ function NavMenuItem(props, context) {
                     leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
                     <MenuItems
                         class="absolute menuitems flex flex-col items-stretch right-0 z-10 mt-2 min-w-48 origin-top-right rounded-md bg-white p-2 shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+
+                        <p class="px-4 py-1 text-xs text-gray-400 uppercase cursor-default">
+                            Navigation
+                        </p>
+                        <NavMenuLink v-for="link of links" :link />
+
                         <template v-for="(sectionKey, index) of Object.keys(menu)" :key="index">
                             <p
                                 :class="[index > 0 && 'mt-3', 'px-4 py-1 text-xs text-gray-400 uppercase cursor-default']">
@@ -77,7 +103,7 @@ function NavMenuItem(props, context) {
     margin-left: 0;
 }
 
-.menuitems .el-button {
-    justify-content: start;
+.el-button {
+    justify-content: stretch;
 }
 </style>

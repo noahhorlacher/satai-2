@@ -43,6 +43,7 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 
 const discriminatorLearningRate = 0.0001
 const ganLearningRate = 0.0001
+const clipValue = 0.01
 
 const discriminator = tf.sequential();
 
@@ -157,10 +158,14 @@ generator.add(tf.layers.conv2dTranspose({
     activation: 'sigmoid'
 }));
 
+// on stability issues:
+// use Wasserstein loss or mean squared error loss
+
 // Compile the discriminator
 discriminator.compile({
     loss: 'binaryCrossentropy',
-    optimizer: tf.train.adam(discriminatorLearningRate, 0.5, 0.999)
+    optimizer: tf.train.adam(discriminatorLearningRate, 0.5, 0.999),
+    clipValue: clipValue
 })
 
 const gan = tf.sequential()
@@ -170,22 +175,64 @@ gan.add(discriminator)
 
 gan.compile({
     loss: 'binaryCrossentropy',
-    optimizer: tf.train.adam(ganLearningRate, 0.5, 0.999)
+    optimizer: tf.train.adam(ganLearningRate, 0.5, 0.999),
+    clipValue: clipValue
 })
 
-const epochs = 100
+function samplesHaveCorrectAmount(samples) {
+    let result = samples.length == batchSize
+
+    if (!result) {
+        console.log('Samples do not have correct amount of images. Expected 10, got', samples.length, 'samples.')
+        console.log('samples', samples)
+    }
+
+    return result
+}
+
+function samplesHaveCorrectAmountRows(samples) {
+    let result = samples.every(sample => sample.length == 64)
+
+    if (!result) {
+        console.log('At least one sample does not have correct amount of rows.')
+        console.log('Faulty sample:', samples.find(sample => sample.length != 64))
+    }
+
+    return result
+}
+
+function samplesHaveCorrectAmountColumns(samples) {
+    let result = samples.every(sample => sample.every(row => row.length == 64))
+
+    if (!result) {
+        console.log('At least one sample does not have correct amount of columns.')
+        console.log('Sample', samples.find(sample => sample.some(row => row.length !== 64)))
+    }
+
+    return result
+}
+
+const epochs = 200
+const batchSize = 5
+let trainingStartDateTime
 async function trainModel() {
     let backend = tf.getBackend()
+    trainingStartDateTime = new Date()
 
     for (let i = 0; i < epochs; i++) {
         chartOptions.xaxis.categories.push(`Epoch ${i}`)
 
-        let realImagesArray = getRandomSamples(10)
+        let realImagesArray = getRandomSamples(batchSize)
 
-        // calculate to amount of numbers inside. It should be 10 * 64 * 64 
-        while (realImagesArray.length < 10 || realImagesArray.some(image => image === undefined) || realImagesArray.some(image => image.length !== 64) || realImagesArray.some(image => image.some(row => row.length !== 64))) {
-            realImagesArray = getRandomSamples(10)
-        }
+        // calculate to amount of numbers inside.It should be batchSize * 64 * 64
+        // while (
+        //     !samplesHaveCorrectAmount(realImagesArray)
+        //     || realImagesArray.some(image => image === undefined)
+        //     || !samplesHaveCorrectAmountRows(realImagesArray)
+        //     || !samplesHaveCorrectAmountColumns(realImagesArray)
+        // ) {
+        //     realImagesArray = getRandomSamples(batchSize)
+        // }
 
         // Convert each 2D image in the array to a 3D image by adding an extra dimension
         realImagesArray = realImagesArray.map(image => {
@@ -196,17 +243,17 @@ async function trainModel() {
             });
         });
 
-        const realImages = tf.tensor4d(realImagesArray, [10, 64, 64, 1]);
+        const realImages = tf.tensor4d(realImagesArray, [batchSize, 64, 64, 1]);
 
         // Check if the conversion is correct
         // Generate a batch of fake images.
-        const noise = tf.randomNormal([10, 100])
+        const noise = tf.randomNormal([batchSize, 100])
         const fakeImages = generator.predict(noise)
 
         // Create a batch of labels for the real and fake images.
         // With label smoothing
-        const realLabels = tf.ones([10, 1]).mul(0.9)
-        const fakeLabels = tf.zeros([10, 1]).mul(0.1)
+        const realLabels = tf.ones([batchSize, 1]).mul(0.9)
+        const fakeLabels = tf.zeros([batchSize, 1]).mul(0.1)
 
         try {
             // Train the discriminator on real and fake images
@@ -216,19 +263,19 @@ async function trainModel() {
             const dLoss = (dLossReal + dLossFake) / 2
 
             // Train the generator via the gan model
-            const misleadingLabels = tf.ones([10, 1])
+            const misleadingLabels = tf.ones([batchSize, 1]).mul(0.9)
             const gLoss = await gan.trainOnBatch(noise, misleadingLabels)
 
             chartSeries[0].data.push(gLoss.toFixed(5))
             chartSeries[1].data.push(dLoss.toFixed(5))
 
-            statusMessage.value = `Using [${backend}]\nTrained epoch ${i + 1} of ${epochs}.\nGAN loss: ${gLoss}\nDiscriminator loss: ${dLoss}`
+            statusMessage.value = `Using [${backend}]\nStarted training on ${trainingStartDateTime.toLocaleString()}\nTrained epoch ${i + 1} of ${epochs}.\nGAN loss: ${gLoss}\nDiscriminator loss: ${dLoss}`
         } catch (error) {
             console.error('Error training:', error)
             statusMessage.value = 'Error training. Check console'
         }
 
-        await tf.nextFrame()
+        await tf.nextFrame() // keep ui responsive
     }
 
     statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`
@@ -241,20 +288,11 @@ function getRandomSamples(n) {
         return []
     }
 
-    // get a random batch from the trainingData
-    let randomBatchIndex = Math.floor(Math.random() * trainingData.length)
-
-    const randomBatchFile = trainingData[randomBatchIndex]
-
-    // unzip the batch
-    const unzippedData = pako.ungzip(randomBatchFile)
-    const array = JSON.parse(new TextDecoder().decode(unzippedData))
-
-    // get n random elements from array
+    // get n random elements from trainingData
     const result = []
     for (let i = 0; i < n; i++) {
-        const randomIndex = Math.floor(Math.random() * array.length)
-        result.push(array[randomIndex])
+        const randomIndex = Math.floor(Math.random() * trainingData.length)
+        result.push(trainingData[randomIndex])
     }
 
     return result
@@ -278,10 +316,20 @@ async function handleFileImport(event) {
             let zipData = await zip.loadAsync(e.target.result)
             zip = null
 
-            Object.keys(zipData.files).forEach(async (filename) => {
-                const fileData = await zipData.files[filename].async('uint8array')
-                trainingData.push(fileData)
-            })
+            for (const filename of Object.keys(zipData.files)) {
+                statusMessage.value = `Unzipping ${filename}...`
+                let fileData = await zipData.files[filename].async('uint8array')
+
+                let unzippedData = pako.ungzip(fileData)
+                fileData = null
+
+                let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
+                unzippedData = null
+
+                trainingData.push(...arrays)
+
+                arrays = null
+            }
 
             zipData = null
 
