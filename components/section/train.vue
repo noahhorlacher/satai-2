@@ -15,8 +15,6 @@ const busy = ref(false)
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
 
-const midiVelocityThreshold = 0.3
-
 // While training, reuse the same batch of samples to pick randomly from for a few epochs
 // so the amount of ungzipping is reduced
 const pickNewBatchEveryNEpochs = 50
@@ -31,9 +29,6 @@ const chartOptions = reactive({
         type: 'line'
     },
     xaxis: {
-        labels: {
-            show: false
-        },
         categories: [],
     }
 })
@@ -67,7 +62,7 @@ const saveEpochs = [
 ]
 
 // for generating
-const midiConfidenceThreshold = 0.3
+const midiConfidenceThreshold = 0.5
 
 const trainedForEpochs = ref(0)
 
@@ -220,8 +215,6 @@ async function trainModel() {
     trainingStartDateTime = new Date()
 
     for (let i = 0; i < epochs; i++) {
-        chartOptions.xaxis.categories.push(`Epoch ${i}`)
-
         let realImagesArray = await getRandomSamples(batchSize)
 
         // Convert each 2D image in the array to a 3D image by adding an extra dimension
@@ -269,6 +262,7 @@ async function trainModel() {
 
         if (saveEpochs.includes(trainedForEpochs.value)) {
             console.log('saving')
+            chartOptions.xaxis.categories.push(`Epoch ${i}`)
 
             previewCanvas()
         }
@@ -379,7 +373,7 @@ function generateMIDI() {
             // clamp 
             const velocity = Math.max(0, Math.min(1.0, data[y][x][0]))
 
-            if (velocity < midiVelocityThreshold) return
+            if (velocity < midiConfidenceThreshold) return
 
             track.addNote({
                 midi: y + 36, // startOctave = 3
@@ -429,7 +423,7 @@ function previewCanvas() {
     // loop over each pixel and set pixel brightness to the generated data$
     for (let y = 0; y < data.length; y++) {
         for (let x = 0; x < data[y].length; x++) {
-            const value = data[y][x]
+            let value = data[y][x]
             const pixelIndex = (y * 64 + x) * 4
 
             // threshold
@@ -458,6 +452,11 @@ function previewCanvas() {
 
     busy.value = false
 }
+
+function nextSave() {
+    const nextSaveEpoch = saveEpochs.find(epoch => epoch > trainedForEpochs.value)
+    return nextSaveEpoch || 'None'
+}
 </script>
 
 <template>
@@ -474,7 +473,10 @@ function previewCanvas() {
 
         <div>
             <div v-if="previewImages.length > 0">
-                <h3 class="text-sm mt-6 mb-2">Latest Preview</h3>
+                <h3 class="text-sm mt-6 mb-2">
+                    Latest Preview ({{ previewImages.at(-1).description }})
+                    Next save at epoch {{ nextSave() }}
+                </h3>
                 <img :src="previewImages.at(-1).src" class="w-1/2 max-w-[350px] h-auto"
                     style="image-rendering: pixelated" />
             </div>
