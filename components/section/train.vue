@@ -8,6 +8,8 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 
 statusMessage.value = 'Press an action button to begin...'
 
+const busy = ref(false)
+
 /*
     architecture of discriminator and generator
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
@@ -47,7 +49,14 @@ const discriminatorLearningRate = 0.0001
 const ganLearningRate = 0.0001
 const clipValue = 0.01
 
+let epochs = 200
+const batchSize = 20
+
+const trainedForEpochs = ref(0)
+
 const discriminator = tf.sequential();
+
+const epochsSelection = ref(200)
 
 // First Convolutional layer - Assuming a larger kernel and stride to reduce dimension significantly
 discriminator.add(tf.layers.conv2d({
@@ -181,43 +190,13 @@ gan.compile({
     clipValue: clipValue
 })
 
-function samplesHaveCorrectAmount(samples) {
-    let result = samples.length == batchSize
-
-    if (!result) {
-        console.log('Samples do not have correct amount of images. Expected 10, got', samples.length, 'samples.')
-        console.log('samples', samples)
-    }
-
-    return result
-}
-
-function samplesHaveCorrectAmountRows(samples) {
-    let result = samples.every(sample => sample.length == 64)
-
-    if (!result) {
-        console.log('At least one sample does not have correct amount of rows.')
-        console.log('Faulty sample:', samples.find(sample => sample.length != 64))
-    }
-
-    return result
-}
-
-function samplesHaveCorrectAmountColumns(samples) {
-    let result = samples.every(sample => sample.every(row => row.length == 64))
-
-    if (!result) {
-        console.log('At least one sample does not have correct amount of columns.')
-        console.log('Sample', samples.find(sample => sample.some(row => row.length !== 64)))
-    }
-
-    return result
-}
-
-const epochs = 200
-const batchSize = 5
 let trainingStartDateTime
 async function trainModel() {
+    statusMessage.value = 'Starting training...'
+
+    epochs = epochsSelection.value
+
+    busy.value = true
     let backend = tf.getBackend()
     trainingStartDateTime = new Date()
 
@@ -226,15 +205,6 @@ async function trainModel() {
 
         let realImagesArray = getRandomSamples(batchSize)
 
-        // calculate to amount of numbers inside.It should be batchSize * 64 * 64
-        // while (
-        //     !samplesHaveCorrectAmount(realImagesArray)
-        //     || realImagesArray.some(image => image === undefined)
-        //     || !samplesHaveCorrectAmountRows(realImagesArray)
-        //     || !samplesHaveCorrectAmountColumns(realImagesArray)
-        // ) {
-        //     realImagesArray = getRandomSamples(batchSize)
-        // }
 
         // Convert each 2D image in the array to a 3D image by adding an extra dimension
         realImagesArray = realImagesArray.map(image => {
@@ -271,14 +241,17 @@ async function trainModel() {
             chartSeries[0].data.push(gLoss.toFixed(5))
             chartSeries[1].data.push(dLoss.toFixed(5))
 
-            statusMessage.value = `Using [${backend}]\nStarted training on ${trainingStartDateTime.toLocaleString()}\nTrained epoch ${i + 1} of ${epochs}.\nGAN loss: ${gLoss}\nDiscriminator loss: ${dLoss}`
+            statusMessage.value = `💡 Using the backend ${backend} to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
         } catch (error) {
             console.error('Error training:', error)
             statusMessage.value = 'Error training. Check console'
         }
 
+        trainedForEpochs.value++
         await tf.nextFrame() // keep ui responsive
     }
+
+    busy.value = false
 
     statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`
 }
@@ -301,6 +274,7 @@ function getRandomSamples(n) {
 }
 
 async function handleFileImport(event) {
+    busy.value = true
     const file = event.target.files[0]
     if (!file) return
 
@@ -335,6 +309,8 @@ async function handleFileImport(event) {
 
             zipData = null
 
+            busy.value = false
+
             statusMessage.value = 'Training data imported successfully.'
         } catch (error) {
             statusMessage.value = `Error importing training data: ${error.message}`
@@ -345,6 +321,8 @@ async function handleFileImport(event) {
 }
 
 function generate() {
+    busy.value = true
+
     const noise = tf.randomNormal([1, 100])
     const generatedData = generator.predict(noise)
     const data = generatedData.arraySync()
@@ -384,6 +362,8 @@ function generate() {
     a.download = 'generated.mid'
     a.click()
     a.remove()
+
+    busy.value = false
 }
 </script>
 
@@ -398,7 +378,8 @@ function generate() {
         </div>
 
         <div>
-            <div class="">
+            <div>
+                <h3 class="text-xs mt-6 mb-2">Trained for {{ trainedForEpochs }} epochs total</h3>
                 <h3 class="text-sm mt-6 mb-2">Loss/Epoch</h3>
                 <apexchart type="line" height="300px" :series="chartSeries" :options="chartOptions" />
             </div>
@@ -406,10 +387,13 @@ function generate() {
             <h3 class="text-sm mt-6 mb-2">Load Processed Training Samples (.zip)</h3>
 
             <div class="mb-4">
-                <p v-if="selectedSamplesName" class="text-xs mb-4 text-gray-500 font-bold">Selected samples:<br><span
-                        class="italic font-regular">{{
-            selectedSamplesName }}</span></p>
-                <el-button @click="fileInput.click()" size="large">
+                <p v-if="selectedSamplesName" class="text-xs mb-4 text-gray-500 font-bold">
+                    Selected samples:<br>
+                    <span class="italic font-regular">
+                        {{ selectedSamplesName }}
+                    </span>
+                </p>
+                <el-button :disabled="busy" @click="fileInput.click()" size="large">
                     <icon class="mr-2" name="material-symbols:attach-file" size="1.5em" />
                     Choose File
                 </el-button>
@@ -418,6 +402,17 @@ function generate() {
             </div>
         </div>
 
-        <el-button @click="trainModel" :disabled="!trainingData || trainingData.length == 0">Train Model</el-button>
+        <h3 class="text-sm mt-6 mb-2">Train</h3>
+        <div class="flex flex-row gap-x-4 mb-4">
+            <el-input-number :disabled="!trainingData || trainingData.length == 0 || busy" v-model="epochsSelection" />
+            <el-button @click="trainModel" :disabled="!trainingData || trainingData.length == 0 || busy">
+                Train Model
+            </el-button>
+        </div>
+
+        <h3 class="text-sm mt-6 mb-2">Test model</h3>
+        <el-button @click="generate" :disabled="busy || trainedForEpochs == 0">
+            Generate Output
+        </el-button>
     </app-section>
 </template>
