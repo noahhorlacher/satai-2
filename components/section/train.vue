@@ -532,6 +532,10 @@ async function saveModel() {
     const generatorModelSaveResult = await generator.save(`downloads://generator-model-${trainedForEpochs.value}-epochs`)
     const ganModelSaveResult = await gan.save(`downloads://gan-model-${trainedForEpochs.value}-epochs`)
 }
+
+async function loadModel() {
+    // implement loading from localstorage or get request
+}
 </script>
 
 <template>
