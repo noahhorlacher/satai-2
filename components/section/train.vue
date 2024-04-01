@@ -61,6 +61,14 @@ const clipValue = 0.01
 let epochs = 200
 let batchSize = 25
 
+// epochs that save the model and generate previews
+const saveEpochs = [
+    0, 1, 3, 5, 10, 15, 20, 30, 40, 50, 70, 90, 100, 120, 150, 180, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 9000, 10000, 12000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 60000, 70000, 80000, 90000, 100000, 120000, 150000, 200000, 250000, 300000, 350000, 400000, 450000, 500000, 600000, 700000, 800000, 900000, 1000000
+]
+
+// for generating
+const midiConfidenceThreshold = 0.3
+
 const trainedForEpochs = ref(0)
 
 const discriminator = tf.sequential()
@@ -258,6 +266,13 @@ async function trainModel() {
         }
 
         trainedForEpochs.value++
+
+        if (saveEpochs.includes(trainedForEpochs.value)) {
+            console.log('saving')
+
+            previewCanvas()
+        }
+
         await tf.nextFrame() // keep ui responsive
     }
 
@@ -340,13 +355,18 @@ async function handleFileImport(event) {
     reader.readAsArrayBuffer(file)
 }
 
-function generate() {
+function generateMIDI() {
     busy.value = true
 
     const noise = tf.randomNormal([1, 100])
     const generatedData = generator.predict(noise)
     let data = generatedData.arraySync()
     data = data[0]
+    data = data.map(row => {
+        return row.map(value => {
+            return value[0] // remove unnecessary dimension
+        })
+    })
 
     // Convert the data to a MIDI files
     const midi = new Midi()
@@ -354,18 +374,16 @@ function generate() {
     // Add a track
     const track = midi.addTrack()
 
-    console.log('data', data)
-
-    for (let i = 0; i < data.length; i++) {
-        for (let j = 0; j < data[i].length; j++) {
+    for (let y = 0; y < data.length; y++) {
+        for (let x = 0; x < data[y].length; x++) {
             // clamp 
-            const velocity = Math.max(0, Math.min(1.0, data[i][j][0]))
+            const velocity = Math.max(0, Math.min(1.0, data[y][x][0]))
 
             if (velocity < midiVelocityThreshold) return
 
             track.addNote({
-                midi: rowIndex + 36, // startOctave = 3
-                time: columnIndex,
+                midi: y + 36, // startOctave = 3
+                time: x,
                 duration: 100,
                 velocity: velocity
             })
@@ -385,6 +403,61 @@ function generate() {
 
     busy.value = false
 }
+
+const canvasPreview = ref()
+const previewImages = ref([])
+function previewCanvas() {
+    busy.value = true
+
+    const noise = tf.randomNormal([1, 100])
+    const generatedData = generator.predict(noise)
+    let data = generatedData.arraySync()
+    data = data[0]
+    data = data.map(row => {
+        return row.map(value => {
+            return value[0] // remove unnecessary dimension
+        })
+    })
+
+    const ctx = canvasPreview.value.getContext('2d')
+    ctx.imageSmoothingEnabled = false
+
+    ctx.clearRect(0, 0, 64, 64)
+
+    const imageData = ctx.createImageData(64, 64)
+
+    // loop over each pixel and set pixel brightness to the generated data$
+    for (let y = 0; y < data.length; y++) {
+        for (let x = 0; x < data[y].length; x++) {
+            const value = data[y][x]
+            const pixelIndex = (y * 64 + x) * 4
+
+            // threshold
+            if (value < midiConfidenceThreshold) {
+                value = 0
+            }
+
+            // draw
+            imageData.data[pixelIndex] = Math.round(value * 255)
+            imageData.data[pixelIndex + 1] = Math.round(value * 255)
+            imageData.data[pixelIndex + 2] = Math.round(value * 255)
+
+            imageData.data[pixelIndex + 3] = 255
+        }
+    }
+
+    // update canvas with new image data
+    ctx.putImageData(imageData, 0, 0)
+    canvasPreview.value.toBlob((blob) => {
+        const url = URL.createObjectURL(blob)
+        previewImages.value.push({
+            description: `${trainedForEpochs.value} Epochs`,
+            src: url
+        })
+    })
+
+    busy.value = false
+}
 </script>
 
 <template>
@@ -400,6 +473,11 @@ function generate() {
         </div>
 
         <div>
+            <div v-if="previewImages.length > 0">
+                <h3 class="text-sm mt-6 mb-2">Latest Preview</h3>
+                <img :src="previewImages.at(-1).src" class="w-1/2 max-w-[350px] h-auto"
+                    style="image-rendering: pixelated" />
+            </div>
             <div>
                 <h3 class="text-xs mt-6 mb-2">Trained for {{ trainedForEpochs }} epochs total</h3>
                 <h3 class="text-sm mt-6 mb-2">Loss/Epoch</h3>
@@ -446,9 +524,33 @@ function generate() {
             </div>
         </div>
 
-        <h3 class="text-sm mt-6 mb-2">Test model</h3>
-        <el-button @click="generate" :disabled="busy || trainedForEpochs == 0">
-            Generate Output
-        </el-button>
+        <div>
+            <h3 class="text-sm mt-6 mb-2">Test model</h3>
+            <!-- <el-button @click="generate" :disabled="busy || trainedForEpochs == 0"> -->
+            <el-button @click="generateMIDI" :disabled="busy">
+                Generate MIDI
+            </el-button>
+            <el-button @click="previewCanvas" :disabled="busy">
+                Preview Image
+            </el-button>
+        </div>
+
+        <div>
+            <h3 class="text-sm mt-6 mb-2">Previews</h3>
+
+            <div v-if="previewImages.length == 0" class="text-xs text-gray-500 mb-4">
+                No previews available. Train or click "Preview Image" to generate previews.
+            </div>
+
+            <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
+                <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/4 h-auto">
+                    <figcaption class="text-xs mb-2">{{ previewImage.description }}</figcaption>
+                    <img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
+                        :key="`previewImage-${index}`" />
+                </figure>
+            </div>
+
+            <canvas class="hidden" width="64" height="64" ref="canvasPreview" />
+        </div>
     </app-section>
 </template>
