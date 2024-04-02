@@ -65,17 +65,17 @@ const trainingDimensions = {
     y: 64
 }
 
-const discriminatorLearningRate = 0.002
-const ganLearningRate = 0.002
+const discriminatorLearningRate = 0.001
+const ganLearningRate = 0.0015
 const clipValue = 0.01
 
 const generatorParamsAmount = 100
 
-// on stability issues:
-// use Wasserstein loss or mean squared error loss
-
 /*
-    architecture based on:
+    For stability issues:
+    Try Wasserstein loss or mean squared error loss
+
+    Architecture based on:
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
 const discriminator = createDiscriminatorModel(trainingDimensions, discriminatorLearningRate, clipValue)
@@ -86,12 +86,12 @@ let trainingStartDateTime
 let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
 
 async function trainModel() {
+    busy.value = true
     statusMessage.value = 'Starting training...'
 
     epochs = epochsSelection.value
     batchSize = batchSizeSelection.value
 
-    busy.value = true
     let backend = tf.getBackend()
     trainingStartDateTime = new Date()
 
@@ -202,12 +202,6 @@ async function getRandomSamples(n) {
 }
 
 function generateMIDI(training = false) {
-    if (!trainingData || trainingData.length == 0) {
-        console.error('No training data available');
-        statusMessage.value = 'No training data available.';
-        return;
-    }
-
     busy.value = true;
 
     let noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount]);
@@ -264,31 +258,21 @@ function generateMIDI(training = false) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'generated.mid';
+    a.download = `SatAi2-sample-${trainedForEpochs.value}.mid`;
     a.click();
     a.remove();
 
     busy.value = false;
 }
 
-
 const canvasPreview = ref()
 const previewImages = ref([])
 function previewImage(training = false) {
-    if (!trainingData || trainingData.length == 0) {
-        console.error('No training data available')
-        statusMessage.value = 'No training data available.'
-        return
-    }
-
-
     busy.value = true
 
     const noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount])
 
     let generatedData = generator.predict(noise)
-
-    console.log('generatedData', generatedData)
 
     let data = generatedData.arraySync()
 
@@ -456,7 +440,7 @@ async function loadModel() {
                     Latest Preview ({{ previewImages[0].description }})
                     Next save at epoch {{ nextSave() }}
                 </h3>
-                <nuxt-img :src="previewImages[0].src" class="w-1/2 max-w-[350px] h-auto"
+                <nuxt-img :src="previewImages[0].src" class="w-full md:w-1/2 max-w-[350px] h-auto"
                     style="image-rendering: pixelated" />
             </div>
             <div>
