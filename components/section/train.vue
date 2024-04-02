@@ -55,7 +55,11 @@ const epochsSelection = ref(epochs)
 const batchSizeSelection = ref(batchSize)
 
 // for generating
-const midiConfidenceThreshold = 0.3
+// Threshold for value to be considered a note (below is 0)
+const midiConfidenceThreshold = ref(0.3)
+
+// Threshold difference in velocity to last x unit (same pitch) to interrupt last and start a new note
+const velocityDifferenceThreshold = ref(0.1)
 
 // Assuming dimensions and startOctave are available from your preprocessing settings
 const startOctave = 3;
@@ -235,8 +239,6 @@ function generateMIDI(training = false) {
 
     // Add a track
     const track = midi.addTrack();
-
-    const velocityDifferenceThreshold = 0.1; // Define the threshold for starting a new note
 
     // Create notes from the generated data
     for (let sample of data) {
@@ -523,7 +525,20 @@ async function loadModel() {
         </div>
 
         <div>
-            <h3 class="text-sm mt-6 mb-2">Test model</h3>
+            <h3 class="text-sm mt-6 mb-2">MIDI Generator Settings</h3>
+
+            <div>
+                <p class="text-xs mb-1">MIDI Confidence Threshold</p>
+                <el-input-number :step="0.05" v-model="midiConfidenceThreshold" />
+            </div>
+            <div>
+                <p class="text-xs mb-1">Velocity Difference Threshold</p>
+                <el-input-number :step="0.05" v-model="velocityDifferenceThreshold" />
+            </div>
+        </div>
+
+        <div>
+            <h3 class="text-sm mt-6 mb-2">Test Model</h3>
             <el-button @click="generateMIDI" :disabled="trainingData.length <= 0 || busy">
                 Generate MIDI
             </el-button>
