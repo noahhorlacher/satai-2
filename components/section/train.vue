@@ -82,9 +82,28 @@ const discriminator = createDiscriminatorModel(trainingDimensions, discriminator
 const generator = createGeneratorModel(trainingDimensions, generatorParamsAmount)
 const gan = createGANModel(generator, discriminator, ganLearningRate, clipValue)
 
+function shouldSaveEpoch() {
+    const i = trainedForEpochs.value
+
+    if (i < 100 && i % 10 === 0) {
+        return true
+    } else if (i < 500 && i % 20 === 0) {
+        return true
+    } else if (i < 1000 && i % 50 === 0) {
+        return true
+    } else if (i < 10000 && i % 100 === 0) {
+        return true
+    } else if (i < 100000 && i % 1000 === 0) {
+        return true
+    } else if (i % 10000 === 0) {
+        return true
+    }
+
+    return false
+}
+
 let trainingStartDateTime
 let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
-
 async function trainModel() {
     busy.value = true
     statusMessage.value = 'Starting training...'
@@ -145,17 +164,17 @@ async function trainModel() {
             chartSeries[1].data.push(dLoss.toFixed(5))
 
             statusMessage.value = `💡 Using backend [${backend}] to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
+
+            trainedForEpochs.value++
+
+            if (shouldSaveEpoch()) {
+                previewImage(true)
+                generateMIDI(true)
+            }
         } catch (error) {
             console.error('Error training:', error)
             console.log('the samples in question', realImagesArray)
             statusMessage.value = 'Error training. Check console'
-        }
-
-        trainedForEpochs.value++
-
-        if (trainedForEpochs.value % 10 == 0) {
-            previewImage(true)
-            generateMIDI(true)
         }
 
         await tf.nextFrame() // keep ui responsive
@@ -258,7 +277,7 @@ function generateMIDI(training = false) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `SatAi2-sample-${trainedForEpochs.value}.mid`;
+    a.download = `SatAi2-sample_epoch-${trainedForEpochs.value}.mid`;
     a.click();
     a.remove();
 
@@ -406,8 +425,21 @@ async function newSampleFileChosen(event) {
 }
 
 function nextSave() {
-    const nextSaveEpoch = trainedForEpochs.value - (trainedForEpochs.value % 10) + 10
-    return nextSaveEpoch || 'None'
+    const i = trainedForEpochs.value
+
+    if (i < 100) {
+        return i - (i % 10) + 10
+    } else if (i < 500 && i % 20 === 0) {
+        return i - (i % 20) + 20
+    } else if (i < 1000 && i % 50 === 0) {
+        return i - (i % 50) + 50
+    } else if (i < 10000 && i % 100 === 0) {
+        return i - (i % 100) + 100
+    } else if (i < 100000 && i % 1000 === 0) {
+        return i - (i % 1000) + 1000
+    } else {
+        return i - (i % 10000) + 10000
+    }
 }
 
 // download both models
