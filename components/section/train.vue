@@ -174,6 +174,10 @@ async function trainModel() {
                 generateMIDI(true)
             }
 
+            if (trainedForEpochs.value % 500 == 0) {
+                await saveModel()
+            }
+
             trainedForEpochs.value++
         } catch (error) {
             console.error('Error training:', error)
