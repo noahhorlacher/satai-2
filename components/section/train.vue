@@ -10,11 +10,6 @@ statusMessage.value = 'Press an action button to begin...'
 
 const busy = ref(false)
 
-/*
-    architecture of discriminator and generator
-    https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
-*/
-
 // While training, reuse the same batch of samples to pick randomly from for a few epochs
 // so the amount of ungzipping is reduced
 const pickNewBatchEveryNEpochs = 50
@@ -30,6 +25,9 @@ const chartOptions = reactive({
     },
     xaxis: {
         categories: [],
+        labels: {
+            show: false
+        }
     }
 })
 
@@ -47,14 +45,15 @@ const chartSeries = reactive([
 const fileInput = ref()
 const selectedSamplesName = ref()
 
-let trainingData = []
+const trainedForEpochs = ref(0)
 
-const discriminatorLearningRate = 0.001
-const ganLearningRate = 0.001
-const clipValue = 0.01
+let trainingData = []
 
 let epochs = 1000
 let batchSize = 32
+
+const epochsSelection = ref(epochs)
+const batchSizeSelection = ref(batchSize)
 
 // for generating
 const midiConfidenceThreshold = 0.3
@@ -62,152 +61,27 @@ const midiConfidenceThreshold = 0.3
 // Assuming dimensions and startOctave are available from your preprocessing settings
 const startOctave = 3;
 
-
-const trainedForEpochs = ref(0)
-
-const discriminator = tf.sequential()
-
-const epochsSelection = ref(epochs)
-const batchSizeSelection = ref(batchSize)
-
 const trainingDimensions = {
     x: 192,
     y: 64
 }
+
+const discriminatorLearningRate = 0.002
+const ganLearningRate = 0.002
+const clipValue = 0.01
+
 const generatorParamsAmount = 100
-
-// First Convolutional layer - Assuming a larger kernel and stride to reduce dimension significantly
-discriminator.add(tf.layers.conv2d({
-    inputShape: [trainingDimensions.y, trainingDimensions.x, 1],
-    filters: trainingDimensions.y * 2,
-    kernelSize: [5, 5],
-    strides: [2, 2],
-    padding: 'same',
-    activation: 'relu'
-}));
-
-// Pooling Layer
-discriminator.add(tf.layers.maxPooling2d({
-    poolSize: [2, 2],
-    strides: [2, 2]
-}));
-
-// Second Convolutional layer
-discriminator.add(tf.layers.conv2d({
-    filters: trainingDimensions.y,
-    kernelSize: [3, 3],
-    strides: [1, 1],
-    padding: 'same',
-    activation: 'relu'
-}));
-
-// Pooling Layer
-discriminator.add(tf.layers.maxPooling2d({
-    poolSize: [2, 2],
-    strides: [2, 2]
-}));
-
-// Third Convolutional layer
-discriminator.add(tf.layers.conv2d({
-    filters: trainingDimensions.y / 2,
-    kernelSize: [3, 3],
-    strides: [1, 1],
-    padding: 'same',
-    activation: 'relu'
-}));
-
-// Pooling Layer
-discriminator.add(tf.layers.maxPooling2d({
-    poolSize: [2, 2],
-    strides: [2, 2]
-}));
-
-// Flatten layer
-discriminator.add(tf.layers.flatten());
-
-// Fully Connected Layer
-discriminator.add(tf.layers.dense({
-    units: 1,
-    activation: 'sigmoid'
-}))
-
-const generator = tf.sequential();
-
-// Start with a dense layer taking the input noise vector (size generatorParamsAmount)
-generator.add(tf.layers.dense({
-    inputShape: [generatorParamsAmount],
-    units: 512, // Increased units for more capacity
-    useBias: false
-}));
-generator.add(tf.layers.batchNormalization());
-generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
-
-// Adding another dense layer to expand
-generator.add(tf.layers.dense({
-    units: 1 * (trainingDimensions.y / 8) * (trainingDimensions.x / 8), // Increased units for subsequent reshape
-    useBias: false
-}));
-generator.add(tf.layers.batchNormalization());
-generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
-
-// Reshape to a 3D volume
-generator.add(tf.layers.reshape({
-    targetShape: [trainingDimensions.y / 8, trainingDimensions.x / 8, 1] // Increased depth for richer feature representation
-}));
-
-// Use Conv2DTranspose to upscale the image dimensions while reducing depth
-// First Conv2DTranspose layer
-// stride is the factor by which the image is upsampled
-generator.add(tf.layers.conv2dTranspose({
-    filters: 128, // Increased filter count
-    kernelSize: 5,
-    strides: 2,
-    padding: 'same',
-    useBias: false
-}));
-generator.add(tf.layers.batchNormalization());
-generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
-
-// Second Conv2DTranspose layer
-generator.add(tf.layers.conv2dTranspose({
-    filters: 64, // Increased filter count
-    kernelSize: 5,
-    strides: 2,
-    padding: 'same',
-    useBias: false
-}));
-generator.add(tf.layers.batchNormalization());
-generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
-
-// Third Conv2DTranspose layer to reach the final size
-generator.add(tf.layers.conv2dTranspose({
-    filters: 1, // Single channel for grayscale image
-    kernelSize: 5,
-    strides: 2,
-    padding: 'same',
-    activation: 'sigmoid'
-}));
 
 // on stability issues:
 // use Wasserstein loss or mean squared error loss
 
-// Compile the discriminator
-discriminator.compile({
-    loss: 'binaryCrossentropy',
-    optimizer: tf.train.adam(discriminatorLearningRate, 0.5, 0.999),
-    clipValue: clipValue
-})
-
-const gan = tf.sequential()
-gan.add(generator)
-generator.trainable = false
-gan.add(discriminator)
-
-gan.compile({
-    loss: 'binaryCrossentropy',
-    optimizer: tf.train.adam(ganLearningRate, 0.5, 0.999),
-    clipValue: clipValue
-})
+/*
+    architecture based on:
+    https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
+*/
+const discriminator = createDiscriminatorModel(trainingDimensions, discriminatorLearningRate, clipValue)
+const generator = createGeneratorModel(trainingDimensions, generatorParamsAmount)
+const gan = createGANModel(generator, discriminator, ganLearningRate, clipValue)
 
 let trainingStartDateTime
 let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
@@ -238,7 +112,7 @@ async function trainModel() {
             })
 
             // Convert the array to a tensor
-            realImages = tf.tensor4d(realImagesArray, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
+            let realImages = tf.tensor4d(realImagesArray, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
 
             // Check if the conversion is correct
             // Generate a batch of fake images.
@@ -281,7 +155,7 @@ async function trainModel() {
         trainedForEpochs.value++
 
         if (trainedForEpochs.value % 10 == 0) {
-            previewCanvas(true)
+            previewImage(true)
             generateMIDI(true)
         }
 
@@ -389,23 +263,37 @@ function generateMIDI(training = false) {
     // Add a track
     const track = midi.addTrack();
 
-    // Assuming midiConfidenceThreshold, startOctave, trainingDimensions are defined
+    // create notes from the generated data
     for (let sample of data) {
         for (let y = 0; y < sample.length; y++) {
+            let noteStartX = null;
+
             for (let x = 0; x < sample[y].length; x++) {
                 const velocity = Math.round(Math.max(0, Math.min(127, sample[y][x] * 127)));
 
                 if (velocity > midiConfidenceThreshold) {
-                    const midiNumber = y + (startOctave * 12); // Calculate MIDI note number
-                    const time = 2 * 8 * (x / trainingDimensions.x); // Time in beats
-                    const duration = 2 * 7 * (1 / trainingDimensions.x); // Duration in beats
+                    if (noteStartX === null) {
+                        noteStartX = x; // Note onset
+                    }
 
-                    track.addNote({
-                        midi: midiNumber,
-                        time: time,
-                        duration: duration,
-                        velocity: velocity / 127 // Normalize velocity to 0-1 range
-                    });
+                    // If this is the last pixel in the row or next pixel is below the threshold, end the note
+                    if (x === sample[y].length - 1 || Math.round(sample[y][x + 1] * 127) <= midiConfidenceThreshold) {
+                        const midiNumber = y + (startOctave * 12);
+                        const startTime = 2 * 8 * (noteStartX / trainingDimensions.x);
+                        const endTime = 2 * 8 * ((x + 1) / trainingDimensions.x);
+                        const duration = endTime - startTime;
+
+                        track.addNote({
+                            midi: midiNumber,
+                            time: startTime,
+                            duration: duration,
+                            velocity: velocity / 127 // Normalize velocity
+                        });
+
+                        noteStartX = null; // Reset for next note
+                    }
+                } else {
+                    noteStartX = null; // Reset if current pixel is below the threshold
                 }
             }
         }
@@ -426,7 +314,7 @@ function generateMIDI(training = false) {
 
 const canvasPreview = ref()
 const previewImages = ref([])
-function previewCanvas(training = false) {
+function previewImage(training = false) {
     if (!trainingData || trainingData.length == 0) {
         console.error('No training data available')
         statusMessage.value = 'No training data available.'
@@ -649,16 +537,16 @@ async function loadModel() {
 
         <div>
             <h3 class="text-sm mt-6 mb-2">Test model</h3>
-            <el-button @click="generateMIDI" :disabled="busy">
+            <el-button @click="generateMIDI" :disabled="trainingData.length <= 0 || busy">
                 Generate MIDI
             </el-button>
-            <el-button @click="previewCanvas" :disabled="busy">
+            <el-button @click="previewImage" :disabled="trainingData.length <= 0 || busy">
                 Preview Image
             </el-button>
             <el-button @click="previewSample" :disabled="trainingData.length <= 0 || busy">
                 Preview Sample
             </el-button>
-            <el-button @click="saveModel" :disabled="busy">
+            <el-button @click="saveModel" :disabled="trainedForEpochs <= 0 || busy">
                 Save Model
             </el-button>
         </div>
