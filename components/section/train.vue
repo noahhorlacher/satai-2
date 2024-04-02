@@ -1,6 +1,5 @@
 <script setup>
 import * as tf from '@tensorflow/tfjs'
-import JSZip from 'jszip'
 import pako from 'pako'
 import { Midi } from '@tonejs/midi'
 
@@ -200,45 +199,6 @@ async function getRandomSamples(n) {
     }
 
     return result
-}
-
-async function handleFileImport(event) {
-    busy.value = true
-    const file = event.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-
-    reader.onload = async (e) => {
-        try {
-            statusMessage.value = 'Importing training data...'
-            trainingData = []
-
-            selectedSamplesName.value = event.target.files[0].name
-
-            // Decompress the zip
-            let zip = new JSZip()
-            let zipData = await zip.loadAsync(e.target.result)
-            zip = null
-
-            // load gzipped batches into trainingData array
-            for (const filename of Object.keys(zipData.files)) {
-                statusMessage.value = `Unzipping ${filename}...`
-                let fileData = await zipData.files[filename].async('uint8array')
-                trainingData.push(fileData)
-            }
-
-            zipData = null
-
-            busy.value = false
-
-            statusMessage.value = 'Training data imported successfully.'
-        } catch (error) {
-            statusMessage.value = `Error importing training data: ${error.message}`
-        }
-    }
-
-    reader.readAsArrayBuffer(file)
 }
 
 function generateMIDI(training = false) {
@@ -451,6 +411,16 @@ async function previewSample() {
     busy.value = false
 }
 
+async function newSampleFileChosen(event) {
+    busy.value = true
+    const { fileName, trainingSamples } = await handleFileImport(event, 'training samples')
+
+    selectedSamplesName.value = fileName
+    trainingData = trainingSamples
+
+    busy.value = false
+}
+
 function nextSave() {
     const nextSaveEpoch = trainedForEpochs.value - (trainedForEpochs.value % 10) + 10
     return nextSaveEpoch || 'None'
@@ -509,7 +479,7 @@ async function loadModel() {
                     Choose File
                 </el-button>
                 <!-- Hidden file input -->
-                <input class="hidden" type="file" ref="fileInput" @change="handleFileImport" accept=".zip" />
+                <input class="hidden" type="file" ref="fileInput" @change="newSampleFileChosen" accept=".zip" />
             </div>
         </div>
 

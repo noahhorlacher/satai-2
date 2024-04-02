@@ -16,10 +16,6 @@ const loadedUnprocessedData = ref()
 
 // load midi data
 let midiFiles = []
-async function createTrainingData() {
-    await loadUnprocessedData()
-    await preprocessData()
-}
 
 // preprocess midi data for training
 async function preprocessData() {
@@ -38,11 +34,11 @@ async function preprocessData() {
         let currentBatch = i / batchSizes + 1
         const preprocessedBatch = await MIDIPreprocessor.preprocess(batch, undefined, `${currentBatch} of ${amountBatches}`)
 
-        // download
         amountSamples += preprocessedBatch.length
         const data = JSON.stringify(preprocessedBatch)
         const gzipData = pako.gzip(data)
 
+        // add the gzip compressed batch to the zip file
         zipFile.file(`batch-${currentBatch}-of-${amountBatches}_size-${batch.length}.json.gz`, gzipData)
     }
 
@@ -50,85 +46,27 @@ async function preprocessData() {
     statusMessage.value = `Compressing all data`
     const zipData = await zipFile.generateAsync({ type: 'uint8array' })
 
-    exportTrainingData(zipData, `SatAi-Training-Data_${loadedUnprocessedName.value}_batch-size-${dataPreprocessorBatchSize}_${amountBatches}-batches_amount-samples-${amountSamples}`)
+    await downloadData(
+        zipData,
+        `SatAi_2_Training_Samples_${loadedUnprocessedName.value}_batch-size-${dataPreprocessorBatchSize}_samples-${amountSamples}`,
+        'application/zip'
+    )
 
     statusMessage.value = `Preprocessing complete. Final amount of samples: ${amountSamples}`
     busy.value = false
 }
 
-// load the midi files
-async function loadUnprocessedData() {
+// handle file import
+async function newMIDIZipChosen(event) {
     busy.value = true
 
-    midiFiles = []
+    const { fileName, trainingSamples } = await handleFileImport(event, true, 'unprocessed MIDI ZIP file')
 
-    try {
-        statusMessage.value = `Loading ${loadedUnprocessedName.value}...`
+    loadedUnprocessedName.value = fileName
+    midiFiles = trainingSamples
 
-        const zipData = loadedUnprocessedData.value
-        const jszip = new JSZip()
-
-        // load zip content
-        const zip = await jszip.loadAsync(zipData)
-
-        let idx = 1
-        let filesAmount = Object.keys(zip.files).length
-
-        // Unzip each file
-        for (const [filename, file] of Object.entries(zip.files)) {
-            statusMessage.value = `Unzipping midi file ${idx++}/${filesAmount}\n(${filename})`
-
-            if (filename.endsWith('.midi') || filename.endsWith('.mid')) {
-                const midiFile = await file.async("arraybuffer")
-                midiFiles.push(midiFile)
-            }
-        }
-
-        statusMessage.value = `Loaded ${midiFiles.length} MIDI files.`
-    } catch (err) {
-        console.error('Error loading midi files:', err)
-        statusMessage.value = 'Error loading midi files. Check console'
-    }
+    loadedUnprocessedData.value = true
     busy.value = false
-}
-
-// download training data
-function exportTrainingData(dataToExport, fileName) {
-    statusMessage.value = `Downloading training data...`
-
-    const blob = new Blob([dataToExport], { type: 'application/zip' });
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${fileName}.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-    a.remove()
-}
-
-// handle file import
-function handleFileImport(event) {
-    const file = event.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.readAsArrayBuffer(file)
-
-    reader.onload = async (e) => {
-        try {
-            statusMessage.value = 'Importing data to process...'
-            loadedUnprocessedName.value = file.name
-            loadedUnprocessedData.value = e.target.result
-
-            statusMessage.value = 'Training data imported successfully.'
-        } catch (error) {
-            statusMessage.value = `Error importing training data: ${error.message}`
-        }
-    }
-
-    reader.onerror = (error) => {
-        statusMessage.value = `FileReader error: ${error.message}`
-    }
 }
 </script>
 
@@ -151,12 +89,12 @@ function handleFileImport(event) {
                 <icon class="mr-2" name="material-symbols:attach-file" size="1.5em" />
                 Choose File
             </el-button>
-            <input class="hidden" type="file" ref="fileInput" @change="handleFileImport" accept=".zip" />
+            <input class="hidden" type="file" ref="fileInput" @change="newMIDIZipChosen" accept=".zip" />
         </div>
 
         <div>
             <h3 class="text-sm mt-6 mb-2">Actions</h3>
-            <el-button @click="createTrainingData" :disabled="!loadedUnprocessedData || busy">Preprocess training
+            <el-button @click="preprocessData" :disabled="!loadedUnprocessedData || busy">Preprocess training
                 data</el-button>
         </div>
     </app-section>
