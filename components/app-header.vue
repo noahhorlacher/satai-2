@@ -63,11 +63,12 @@ function NavMenuItem(props, context) {
             <Menu as="div" class="relative" v-slot="{ open }">
 
                 <!-- Menu trigger -->
-                <MenuButton class="relative flex rounded-full text-sm">
-                    <el-button size="large" circle text :bg="open" style="padding: 1.6em;">
-                        <icon v-if="!open" name="ic:menu" size="2em" />
-                        <icon v-else name="material-symbols:close" size="1.5em" />
-                    </el-button>
+                <MenuButton class="relative flex rounded-full text-xl">
+                    <div
+                        :class="['p-1 border-box text-center hover:bg-gray-200 rounded-md', open ? 'bg-gray-200' : '']">
+                        <icon v-if="!open" name="ic:menu" size="1.3em" />
+                        <icon v-else name="material-symbols:close" size="1.3em" />
+                    </div>
                 </MenuButton>
 
                 <!-- Menu items -->

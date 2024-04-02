@@ -49,20 +49,19 @@ const selectedSamplesName = ref()
 
 let trainingData = []
 
-const discriminatorLearningRate = 0.00015
-const ganLearningRate = 0.0001
+const discriminatorLearningRate = 0.001
+const ganLearningRate = 0.001
 const clipValue = 0.01
 
-let epochs = 600
+let epochs = 1000
 let batchSize = 32
 
-// epochs that save the model and generate previews
-const saveEpochs = [
-    0, 1, 3, 5, 10, 15, 20, 30, 40, 50, 70, 90, 100, 120, 150, 180, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 9000, 10000, 12000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 60000, 70000, 80000, 90000, 100000, 120000, 150000, 200000, 250000, 300000, 350000, 400000, 450000, 500000, 600000, 700000, 800000, 900000, 1000000
-]
-
 // for generating
-const midiConfidenceThreshold = 0.1
+const midiConfidenceThreshold = 0.3
+
+// Assuming dimensions and startOctave are available from your preprocessing settings
+const startOctave = 3;
+
 
 const trainedForEpochs = ref(0)
 
@@ -71,10 +70,16 @@ const discriminator = tf.sequential()
 const epochsSelection = ref(epochs)
 const batchSizeSelection = ref(batchSize)
 
+const trainingDimensions = {
+    x: 256,
+    y: 64
+}
+const generatorParamsAmount = 100
+
 // First Convolutional layer - Assuming a larger kernel and stride to reduce dimension significantly
 discriminator.add(tf.layers.conv2d({
-    inputShape: [64, 64, 1],
-    filters: 128,
+    inputShape: [trainingDimensions.y, trainingDimensions.x, 1],
+    filters: trainingDimensions.y * 2,
     kernelSize: [5, 5],
     strides: [2, 2],
     padding: 'same',
@@ -89,7 +94,7 @@ discriminator.add(tf.layers.maxPooling2d({
 
 // Second Convolutional layer
 discriminator.add(tf.layers.conv2d({
-    filters: 64,
+    filters: trainingDimensions.y,
     kernelSize: [3, 3],
     strides: [1, 1],
     padding: 'same',
@@ -104,7 +109,7 @@ discriminator.add(tf.layers.maxPooling2d({
 
 // Third Convolutional layer
 discriminator.add(tf.layers.conv2d({
-    filters: 32,
+    filters: trainingDimensions.y / 2,
     kernelSize: [3, 3],
     strides: [1, 1],
     padding: 'same',
@@ -128,9 +133,9 @@ discriminator.add(tf.layers.dense({
 
 const generator = tf.sequential();
 
-// Start with a dense layer taking the input noise vector (size 100)
+// Start with a dense layer taking the input noise vector (size generatorParamsAmount)
 generator.add(tf.layers.dense({
-    inputShape: [100],
+    inputShape: [generatorParamsAmount],
     units: 512, // Increased units for more capacity
     useBias: false
 }));
@@ -139,7 +144,7 @@ generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
 
 // Adding another dense layer to expand
 generator.add(tf.layers.dense({
-    units: 256 * 8 * 8, // Increased units for subsequent reshape
+    units: 1 * (trainingDimensions.y / 8) * (trainingDimensions.x / 8), // Increased units for subsequent reshape
     useBias: false
 }));
 generator.add(tf.layers.batchNormalization());
@@ -147,11 +152,12 @@ generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
 
 // Reshape to a 3D volume
 generator.add(tf.layers.reshape({
-    targetShape: [8, 8, 256] // Increased depth for richer feature representation
+    targetShape: [trainingDimensions.y / 8, trainingDimensions.x / 8, 1] // Increased depth for richer feature representation
 }));
 
 // Use Conv2DTranspose to upscale the image dimensions while reducing depth
 // First Conv2DTranspose layer
+// stride is the factor by which the image is upsampled
 generator.add(tf.layers.conv2dTranspose({
     filters: 128, // Increased filter count
     kernelSize: 5,
@@ -204,6 +210,8 @@ gan.compile({
 })
 
 let trainingStartDateTime
+let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
+
 async function trainModel() {
     statusMessage.value = 'Starting training...'
 
@@ -214,11 +222,9 @@ async function trainModel() {
     let backend = tf.getBackend()
     trainingStartDateTime = new Date()
 
-    let realImagesArray
-
     for (let i = 0; i < epochs; i++) {
         try {
-            realImagesArray = await getRandomSamples(batchSize)
+            let realImagesArray = await getRandomSamples(batchSize)
 
             // Convert each 2D image in the array to a 3D image by adding an extra dimension
             realImagesArray = realImagesArray.map(image => {
@@ -229,11 +235,11 @@ async function trainModel() {
                 })
             })
 
-            const realImages = tf.tensor4d(realImagesArray, [batchSize, 64, 64, 1]);
+            const realImages = tf.tensor4d(realImagesArray, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
 
             // Check if the conversion is correct
             // Generate a batch of fake images.
-            const noise = tf.randomNormal([batchSize, 100])
+            const noise = tf.randomNormal([batchSize, generatorParamsAmount])
             const fakeImages = generator.predict(noise)
 
             // Create a batch of labels for the real and fake images.
@@ -245,11 +251,19 @@ async function trainModel() {
             let dLossReal = await discriminator.trainOnBatch(realImages, realLabels)
             let dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels)
 
+            realImages.dispose()
+            fakeImages.dispose()
+            realLabels.dispose()
+            fakeLabels.dispose()
+
             const dLoss = (dLossReal + dLossFake) / 2
 
             // Train the generator via the gan model
             const misleadingLabels = tf.ones([batchSize, 1]).mul(0.9)
             const gLoss = await gan.trainOnBatch(noise, misleadingLabels)
+
+            noise.dispose()
+            misleadingLabels.dispose()
 
             chartSeries[0].data.push(gLoss.toFixed(5))
             chartSeries[1].data.push(dLoss.toFixed(5))
@@ -263,12 +277,9 @@ async function trainModel() {
 
         trainedForEpochs.value++
 
-        if (trainedForEpochs.value % 100 == 0) {
-            chartOptions.xaxis.categories.push(`Epoch ${i}`)
-        }
-
-        if (saveEpochs.includes(trainedForEpochs.value)) {
-            previewCanvas()
+        if (trainedForEpochs.value % 10 == 0) {
+            previewCanvas(true)
+            generateMIDI(true)
         }
 
         await tf.nextFrame() // keep ui responsive
@@ -353,18 +364,32 @@ async function handleFileImport(event) {
     reader.readAsArrayBuffer(file)
 }
 
-function generateMIDI() {
-    busy.value = true;
+function generateMIDI(training = false) {
+    if (!trainingData || trainingData.length == 0) {
+        console.error('No training data available')
+        statusMessage.value = 'No training data available.'
+        return
+    }
 
-    const noise = tf.randomNormal([1, 100]);
-    const generatedData = generator.predict(noise);
-    let data = generatedData.arraySync();
-    data = data[0];
-    data = data.map(row => {
-        return row.map(value => {
-            return value[0]; // remove unnecessary dimension
-        });
-    });
+    busy.value = true
+
+    let noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount])
+
+    console.log('Noise', noise)
+
+    const generatedData = generator.predict(noise)
+
+    console.log('predicted')
+
+    let data = generatedData.arraySync()
+
+    for (let sample of data) {
+        for (let row of sample) {
+            for (let value of row) {
+                value[0] // remove unnecessary dimension
+            }
+        }
+    }
 
     // Convert the data to a MIDI file
     const midi = new Midi();
@@ -372,27 +397,29 @@ function generateMIDI() {
     // Add a track
     const track = midi.addTrack();
 
-    // Assuming dimensions and startOctave are available from your preprocessing settings
-    const dimensions = 64;
-    const startOctave = 3;
+    for (let sample of data) {
+        for (let y = 0; y < sample.length; y++) {
+            for (let x = 0; x < sample[y].length; x++) {
+                const velocity = Math.max(0, Math.min(1.0, sample[y][x]));
 
-    for (let y = 0; y < data.length; y++) {
-        for (let x = 0; x < data[y].length; x++) {
-            const velocity = Math.max(0, Math.min(1.0, data[y][x]));
-            if (velocity < midiConfidenceThreshold) continue;
 
-            const midiNumber = y + (startOctave * 12); // Calculate MIDI note number
-            const time = x / dimensions; // Time in beats (assuming 1 beat per dimension)
-            const duration = 1 / dimensions; // Duration in beats
 
-            track.addNote({
-                midi: midiNumber,
-                time: time,
-                duration: duration,
-                velocity: velocity
-            });
+                if (velocity > midiConfidenceThreshold) {
+                    const midiNumber = y + (startOctave * 12); // Calculate MIDI note number
+                    const time = 8 * (x / trainingDimensions.x); // Time in beats (assuming 1 beat per dimension)
+                    const duration = 7 * (1 / trainingDimensions.x); // Duration in beats
+
+                    track.addNote({
+                        midi: midiNumber,
+                        time: time,
+                        duration: duration,
+                        velocity: velocity
+                    });
+                }
+            }
         }
     }
+
 
     // Convert the MIDI to a blob
     const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
@@ -408,63 +435,88 @@ function generateMIDI() {
     busy.value = false;
 }
 
-
 const canvasPreview = ref()
 const previewImages = ref([])
-function previewCanvas() {
+function previewCanvas(training = false) {
+    if (!trainingData || trainingData.length == 0) {
+        console.error('No training data available')
+        statusMessage.value = 'No training data available.'
+        return
+    }
+
+
     busy.value = true
 
-    const noise = tf.randomNormal([1, 100])
-    const generatedData = generator.predict(noise)
+    const noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount])
+
+    let generatedData = generator.predict(noise)
+
+    console.log('generatedData', generatedData)
+
     let data = generatedData.arraySync()
-    data = data[0]
-    data = data.map(row => {
-        return row.map(value => {
-            return value[0] // remove unnecessary dimension
+
+
+    data = data.map(sample => {
+        return sample.map(row => {
+            return row.map(value => {
+                return value[0] // remove unnecessary dimension
+            })
         })
     })
 
     const ctx = canvasPreview.value.getContext('2d')
     ctx.imageSmoothingEnabled = false
 
-    ctx.clearRect(0, 0, 64, 64)
+    ctx.clearRect(0, 0, trainingDimensions.x, trainingDimensions.y)
 
-    const imageData = ctx.createImageData(64, 64)
+    const imageData = ctx.createImageData(trainingDimensions.x, trainingDimensions.y)
+    console.log('data', data)
 
-    // loop over each pixel and set pixel brightness to the generated data$
-    for (let y = 0; y < data.length; y++) {
-        for (let x = 0; x < data[y].length; x++) {
-            let value = data[y][x]
-            const pixelIndex = (y * 64 + x) * 4
 
-            // threshold
-            if (value < midiConfidenceThreshold) {
-                value = 0
+    // loop over each pixel and set pixel brightness to the generated data
+    for (let sample of data) {
+        for (let y = 0; y < trainingDimensions.y; y++) {
+            for (let x = 0; x < trainingDimensions.x; x++) {
+                let value = sample[y][x]
+                const pixelIndex = (y * trainingDimensions.x + x) * 4
+
+                // threshold
+                if (value < midiConfidenceThreshold) {
+                    value = 0
+                }
+
+                // draw
+                imageData.data[pixelIndex] = Math.round(value * 255)
+                imageData.data[pixelIndex + 1] = Math.round(value * 255)
+                imageData.data[pixelIndex + 2] = Math.round(value * 255)
+
+                imageData.data[pixelIndex + 3] = 255
             }
-
-            // draw
-            imageData.data[pixelIndex] = Math.round(value * 255)
-            imageData.data[pixelIndex + 1] = Math.round(value * 255)
-            imageData.data[pixelIndex + 2] = Math.round(value * 255)
-
-            imageData.data[pixelIndex + 3] = 255
         }
+
+        // update canvas with new image data
+        ctx.putImageData(imageData, 0, 0)
+        canvasPreview.value.toBlob((blob) => {
+            const url = URL.createObjectURL(blob)
+            previewImages.value.unshift({
+                description: `Epoch ${trainedForEpochs.value}`,
+                src: url
+            })
+        })
     }
 
-    // update canvas with new image data
-    ctx.putImageData(imageData, 0, 0)
-    canvasPreview.value.toBlob((blob) => {
-        const url = URL.createObjectURL(blob)
-        previewImages.value.unshift({
-            description: `${trainedForEpochs.value} Epochs`,
-            src: url
-        })
-    })
+
 
     busy.value = false
 }
 
 async function previewSample() {
+    if (!trainingData || trainingData.length == 0) {
+        console.error('No training data available')
+        statusMessage.value = 'No training data available.'
+        return
+    }
+
     busy.value = true
 
     currentLoadedSampleBatch.batchName = trainingData[Math.floor(Math.random() * trainingData.length)]
@@ -485,15 +537,15 @@ async function previewSample() {
     const ctx = canvasPreview.value.getContext('2d')
     ctx.imageSmoothingEnabled = false
 
-    ctx.clearRect(0, 0, 64, 64)
+    ctx.clearRect(0, 0, trainingDimensions.x, trainingDimensions.y)
 
-    const imageData = ctx.createImageData(64, 64)
+    const imageData = ctx.createImageData(trainingDimensions.x, trainingDimensions.y)
 
     // loop over each pixel and set pixel brightness to the generated data$
     for (let y = 0; y < randomSample.length; y++) {
         for (let x = 0; x < randomSample[y].length; x++) {
             let value = randomSample[y][x]
-            const pixelIndex = (y * 64 + x) * 4
+            const pixelIndex = (y * trainingDimensions.x + x) * 4
 
             // threshold
             if (value < midiConfidenceThreshold) {
@@ -523,7 +575,7 @@ async function previewSample() {
 }
 
 function nextSave() {
-    const nextSaveEpoch = saveEpochs.find(epoch => epoch > trainedForEpochs.value)
+    const nextSaveEpoch = trainedForEpochs.value - (trainedForEpochs.value % 10) + 10
     return nextSaveEpoch || 'None'
 }
 
@@ -554,10 +606,10 @@ async function loadModel() {
         <div>
             <div v-if="previewImages.length > 0">
                 <h3 class="text-sm mt-6 mb-2">
-                    Latest Preview ({{ previewImages.at(-1).description }})
+                    Latest Preview ({{ previewImages[0].description }})
                     Next save at epoch {{ nextSave() }}
                 </h3>
-                <img :src="previewImages.at(-1).src" class="w-1/2 max-w-[350px] h-auto"
+                <img :src="previewImages[0].src" class="w-1/2 max-w-[350px] h-auto"
                     style="image-rendering: pixelated" />
             </div>
             <div>
@@ -631,14 +683,14 @@ async function loadModel() {
             </div>
 
             <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
-                <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/4 h-auto">
+                <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/3 h-auto">
                     <figcaption class="text-xs mb-2">{{ previewImage.description }}</figcaption>
                     <img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
                         :key="`previewImage-${index}`" />
                 </figure>
             </div>
 
-            <canvas class="hidden" width="64" height="64" ref="canvasPreview" />
+            <canvas class="hidden" :width="trainingDimensions.x" :height="trainingDimensions.y" ref="canvasPreview" />
         </div>
     </app-section>
 </template>
