@@ -46,9 +46,11 @@ async function preprocessData() {
     statusMessage.value = `Compressing all data`
     const zipData = await zipFile.generateAsync({ type: 'uint8array' })
 
+    let filenameWithoutExtension = loadedUnprocessedName.value.split('.').slice(0, -1).join('.')
+
     await downloadData(
         zipData,
-        `SatAi_2_Training_Samples_${loadedUnprocessedName.value}_batch-size-${dataPreprocessorBatchSize}_samples-${amountSamples}`,
+        `SatAi_2_Training_Samples_${filenameWithoutExtension}_batch-size-${dataPreprocessorBatchSize}_samples-${amountSamples}`,
         'application/zip'
     )
 
