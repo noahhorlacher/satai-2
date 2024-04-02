@@ -160,17 +160,17 @@ async function trainModel() {
             noise.dispose()
             misleadingLabels.dispose()
 
-            chartSeries[0].data.push(gLoss.toFixed(5))
-            chartSeries[1].data.push(dLoss.toFixed(5))
-
             statusMessage.value = `💡 Using backend [${backend}] to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
 
-            trainedForEpochs.value++
+            chartSeries[0].data.push(gLoss.toFixed(5))
+            chartSeries[1].data.push(dLoss.toFixed(5))
 
             if (shouldSaveEpoch()) {
                 previewImage(true)
                 generateMIDI(true)
             }
+
+            trainedForEpochs.value++
         } catch (error) {
             console.error('Error training:', error)
             console.log('the samples in question', realImagesArray)
@@ -236,21 +236,26 @@ function generateMIDI(training = false) {
     // Add a track
     const track = midi.addTrack();
 
-    // create notes from the generated data
+    const velocityDifferenceThreshold = 0.1; // Define the threshold for starting a new note
+
+    // Create notes from the generated data
     for (let sample of data) {
         for (let y = 0; y < sample.length; y++) {
             let noteStartX = null;
+            let lastVelocity = 0;
 
             for (let x = 0; x < sample[y].length; x++) {
-                const velocity = Math.round(Math.max(0, Math.min(127, sample[y][x] * 127)));
+                const velocity = Math.max(0, Math.min(1, sample[y][x]));
 
                 if (velocity > midiConfidenceThreshold) {
-                    if (noteStartX === null) {
+                    // Check if the difference in velocity is large enough to start a new note
+                    if (noteStartX === null || Math.abs(velocity - lastVelocity) > velocityDifferenceThreshold) {
                         noteStartX = x; // Note onset
+                        lastVelocity = velocity;
                     }
 
                     // If this is the last pixel in the row or next pixel is below the threshold, end the note
-                    if (x === sample[y].length - 1 || Math.round(sample[y][x + 1] * 127) <= midiConfidenceThreshold) {
+                    if (x === sample[y].length - 1 || (Math.abs(sample[y][x + 1] - velocity) > velocityDifferenceThreshold)) {
                         const midiNumber = y + (startOctave * 12);
                         const startTime = 2 * 8 * (noteStartX / trainingDimensions.x);
                         const endTime = 2 * 8 * ((x + 1) / trainingDimensions.x);
@@ -260,13 +265,14 @@ function generateMIDI(training = false) {
                             midi: midiNumber,
                             time: startTime,
                             duration: duration,
-                            velocity: velocity / 127 // Normalize velocity
+                            velocity: velocity // Velocity already normalized
                         });
 
                         noteStartX = null; // Reset for next note
                     }
                 } else {
                     noteStartX = null; // Reset if current pixel is below the threshold
+                    lastVelocity = 0;
                 }
             }
         }
@@ -274,12 +280,7 @@ function generateMIDI(training = false) {
 
     // Convert the MIDI to a blob and download
     const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `SatAi2-sample_epoch-${trainedForEpochs.value}.mid`;
-    a.click();
-    a.remove();
+    downloadData(blob, `SatAi2-sample_epoch-${trainedForEpochs.value}.mid`, 'audio/midi')
 
     busy.value = false;
 }

@@ -50,7 +50,7 @@ async function preprocessData() {
 
     await downloadData(
         zipData,
-        `SatAi_2_Training_Samples_${filenameWithoutExtension}_batch-size-${dataPreprocessorBatchSize}_samples-${amountSamples}`,
+        `SatAi_2_Training_Samples_${filenameWithoutExtension}_batch-size-${dataPreprocessorBatchSize}_samples-${amountSamples}.zip`,
         'application/zip'
     )
 
