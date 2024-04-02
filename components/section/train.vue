@@ -71,7 +71,7 @@ const epochsSelection = ref(epochs)
 const batchSizeSelection = ref(batchSize)
 
 const trainingDimensions = {
-    x: 256,
+    x: 192,
     y: 64
 }
 const generatorParamsAmount = 100
@@ -222,9 +222,11 @@ async function trainModel() {
     let backend = tf.getBackend()
     trainingStartDateTime = new Date()
 
+    let realImagesArray
+
     for (let i = 0; i < epochs; i++) {
         try {
-            let realImagesArray = await getRandomSamples(batchSize)
+            realImagesArray = await getRandomSamples(batchSize)
 
             // Convert each 2D image in the array to a 3D image by adding an extra dimension
             realImagesArray = realImagesArray.map(image => {
@@ -235,7 +237,8 @@ async function trainModel() {
                 })
             })
 
-            const realImages = tf.tensor4d(realImagesArray, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
+            // Convert the array to a tensor
+            realImages = tf.tensor4d(realImagesArray, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
 
             // Check if the conversion is correct
             // Generate a batch of fake images.
@@ -366,30 +369,19 @@ async function handleFileImport(event) {
 
 function generateMIDI(training = false) {
     if (!trainingData || trainingData.length == 0) {
-        console.error('No training data available')
-        statusMessage.value = 'No training data available.'
-        return
+        console.error('No training data available');
+        statusMessage.value = 'No training data available.';
+        return;
     }
 
-    busy.value = true
+    busy.value = true;
 
-    let noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount])
+    let noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount]);
+    const generatedData = generator.predict(noise);
+    let data = generatedData.arraySync();
 
-    console.log('Noise', noise)
-
-    const generatedData = generator.predict(noise)
-
-    console.log('predicted')
-
-    let data = generatedData.arraySync()
-
-    for (let sample of data) {
-        for (let row of sample) {
-            for (let value of row) {
-                value[0] // remove unnecessary dimension
-            }
-        }
-    }
+    // Flatten the data and remove the unnecessary dimension
+    data = data.map(sample => sample.map(row => row.map(value => value[0])));
 
     // Convert the data to a MIDI file
     const midi = new Midi();
@@ -397,34 +389,30 @@ function generateMIDI(training = false) {
     // Add a track
     const track = midi.addTrack();
 
+    // Assuming midiConfidenceThreshold, startOctave, trainingDimensions are defined
     for (let sample of data) {
         for (let y = 0; y < sample.length; y++) {
             for (let x = 0; x < sample[y].length; x++) {
-                const velocity = Math.max(0, Math.min(1.0, sample[y][x]));
-
-
+                const velocity = Math.round(Math.max(0, Math.min(127, sample[y][x] * 127)));
 
                 if (velocity > midiConfidenceThreshold) {
                     const midiNumber = y + (startOctave * 12); // Calculate MIDI note number
-                    const time = 8 * (x / trainingDimensions.x); // Time in beats (assuming 1 beat per dimension)
-                    const duration = 7 * (1 / trainingDimensions.x); // Duration in beats
+                    const time = 2 * 8 * (x / trainingDimensions.x); // Time in beats
+                    const duration = 2 * 7 * (1 / trainingDimensions.x); // Duration in beats
 
                     track.addNote({
                         midi: midiNumber,
                         time: time,
                         duration: duration,
-                        velocity: velocity
+                        velocity: velocity / 127 // Normalize velocity to 0-1 range
                     });
                 }
             }
         }
     }
 
-
-    // Convert the MIDI to a blob
+    // Convert the MIDI to a blob and download
     const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
-
-    // Download the blob
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -434,6 +422,7 @@ function generateMIDI(training = false) {
 
     busy.value = false;
 }
+
 
 const canvasPreview = ref()
 const previewImages = ref([])
@@ -609,7 +598,7 @@ async function loadModel() {
                     Latest Preview ({{ previewImages[0].description }})
                     Next save at epoch {{ nextSave() }}
                 </h3>
-                <img :src="previewImages[0].src" class="w-1/2 max-w-[350px] h-auto"
+                <nuxt-img :src="previewImages[0].src" class="w-1/2 max-w-[350px] h-auto"
                     style="image-rendering: pixelated" />
             </div>
             <div>
@@ -660,14 +649,13 @@ async function loadModel() {
 
         <div>
             <h3 class="text-sm mt-6 mb-2">Test model</h3>
-            <!-- <el-button @click="generate" :disabled="busy || trainedForEpochs == 0"> -->
             <el-button @click="generateMIDI" :disabled="busy">
                 Generate MIDI
             </el-button>
             <el-button @click="previewCanvas" :disabled="busy">
                 Preview Image
             </el-button>
-            <el-button @click="previewSample" :disabled="busy">
+            <el-button @click="previewSample" :disabled="trainingData.length <= 0 || busy">
                 Preview Sample
             </el-button>
             <el-button @click="saveModel" :disabled="busy">
@@ -685,7 +673,7 @@ async function loadModel() {
             <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
                 <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/3 h-auto">
                     <figcaption class="text-xs mb-2">{{ previewImage.description }}</figcaption>
-                    <img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
+                    <nuxt-img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
                         :key="`previewImage-${index}`" />
                 </figure>
             </div>

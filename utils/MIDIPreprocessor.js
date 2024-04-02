@@ -4,7 +4,7 @@ const chromaticInstruments = [...Array(113).keys()].filter(i => !(i === 48 || (i
 
 export default class MIDIPreprocessor {
     // Constants
-    static DEFAULT_DIMENSIONS = { x: 256, y: 64 };
+    static DEFAULT_DIMENSIONS = { x: 192, y: 64 };
     static DEFAULT_START_OCTAVE = 3;
     static DEFAULT_HORIZONTAL_RESOLUTION = 1 / 8;
     static DEFAULT_STEP_SIZE_X = 1;
@@ -81,7 +81,7 @@ export default class MIDIPreprocessor {
         });
 
         if (validTrackIndex === -1) {
-            throw new Error('No valid track found');
+            throw new Error('MIDI File excluded from dataset: No valid track found');
         }
         return validTrackIndex;
     }
