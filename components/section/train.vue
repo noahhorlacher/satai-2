@@ -479,8 +479,7 @@ async function loadModel() {
                     Latest Preview ({{ previewImages[0].description }})
                     Next save at epoch {{ nextSave() }}
                 </h3>
-                <nuxt-img :src="previewImages[0].src" class="w-full md:w-1/2 max-w-[350px] h-auto"
-                    style="image-rendering: pixelated" />
+                <nuxt-img :src="previewImages[0].src" class="w-full h-auto" style="image-rendering: pixelated" />
             </div>
             <div>
                 <h3 class="text-xs mt-6 mb-2">Trained for {{ trainedForEpochs }} epochs total</h3>
@@ -565,7 +564,7 @@ async function loadModel() {
             </div>
 
             <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
-                <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-1/3 h-auto">
+                <figure v-for="(previewImage, index) of previewImages" class="grow shrink w-full h-auto">
                     <figcaption class="text-xs mb-2">{{ previewImage.description }}</figcaption>
                     <nuxt-img class="w-full" style="image-rendering: pixelated" :src="previewImage.src"
                         :key="`previewImage-${index}`" />
