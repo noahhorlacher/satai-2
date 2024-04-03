@@ -65,13 +65,9 @@ const velocityDifferenceThreshold = ref(0.1)
 const startOctave = 3;
 
 const trainingDimensions = {
-    x: 192,
+    x: 128,
     y: 64
 }
-
-const discriminatorLearningRate = 0.001
-const ganLearningRate = 0.0015
-const clipValue = 0.01
 
 const generatorParamsAmount = 100
 
@@ -82,9 +78,12 @@ const generatorParamsAmount = 100
     Architecture based on:
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
-const discriminator = createDiscriminatorModel(trainingDimensions, discriminatorLearningRate, clipValue)
-const generator = createGeneratorModel(trainingDimensions, generatorParamsAmount)
-const gan = createGANModel(generator, discriminator, ganLearningRate, clipValue)
+// const modelStore = useModelStore()
+// const { discriminator, generator, gan } = toRefs(useModelStore())
+
+onMounted(() => {
+    // modelStore.initialize()
+})
 
 function shouldSaveEpoch() {
     const i = trainedForEpochs.value

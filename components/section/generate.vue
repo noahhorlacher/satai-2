@@ -3,7 +3,7 @@ const { statusMessage } = toRefs(useStatusMessageStore())
 </script>
 
 <template>
-    <app-section title="Train">
+    <app-section title="Generate">
         <div class="flex flex-row justify-between items-center mb-2">
             <h3 class="text-sm">Status</h3>
         </div>
