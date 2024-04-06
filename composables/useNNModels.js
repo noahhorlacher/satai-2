@@ -1,4 +1,4 @@
-export function useModel(settings = {
+export function useNNModels(settings = {
     outputDimensions: {
         x: 128,
         y: 64
