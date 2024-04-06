@@ -161,7 +161,7 @@ async function trainModel() {
             }
 
             // Save model periodically
-            if (trainedForEpochs.value != 0 && trainedForEpochs.value % 300 == 0) {
+            if (trainedForEpochs.value > 1 && trainedForEpochs.value % 300 == 0) {
                 saveModel();
             }
 
@@ -213,6 +213,7 @@ async function getRandomSamples(n) {
     return result
 }
 
+const generatedMIDIs = ref([])
 function generateMIDI(training = false) {
     busy.value = true;
 
@@ -266,11 +267,25 @@ function generateMIDI(training = false) {
         }
 
         // Convert the MIDI to a blob and download
-        const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
-        downloadData(blob, `SatAi2-sample_epoch-${trainedForEpochs.value}.mid`, 'audio/midi')
+        const blob = new Blob([midi.toArray()], { type: 'audio/midi' })
+
+        blobToBase64(blob).then((midiBase64) => {
+            generatedMIDIs.value.unshift({ description: `SatAi 2 MIDI, Epoch ${trainedForEpochs.value}`, src: midiBase64 })
+        })
     }
 
     busy.value = false;
+}
+
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+            resolve(reader.result);
+        };
+        reader.onerror = reject;
+    });
 }
 
 
@@ -434,9 +449,9 @@ function nextSave() {
 async function saveModel() {
     lastEpochSaved.value = trainedForEpochs.value
 
-    const discriminatorModelSaveResult = await discriminator.save(`downloads://discriminator-model-${trainedForEpochs.value}-epochs`)
-    const generatorModelSaveResult = await generator.save(`downloads://generator-model-${trainedForEpochs.value}-epochs`)
-    const ganModelSaveResult = await gan.save(`downloads://gan-model-${trainedForEpochs.value}-epochs`)
+    await discriminator.save(`downloads://discriminator-model-${trainedForEpochs.value}-epochs`)
+    await generator.save(`downloads://generator-model-${trainedForEpochs.value}-epochs`)
+    await gan.save(`downloads://gan-model-${trainedForEpochs.value}-epochs`)
 }
 
 async function loadModel() {
@@ -540,10 +555,29 @@ async function loadModel() {
         </div>
 
         <div>
-            <h3 class="text-sm mt-6 mb-2">Previews</h3>
+            <h3 class="text-sm mt-6 mb-2">Generated MIDI files</h3>
+
+            <div v-if="generatedMIDIs.length == 0" class="text-xs text-gray-500 mb-4">
+                No generated MIDI files available. Train or click "Generate MIDI".
+            </div>
+
+            <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
+                <div v-for="(generatedMIDI, index) of generatedMIDIs" :key="`midi-preview-${index}`">
+                    <p class="text-xs mb-2">{{ generatedMIDI.description }}</p>
+                    <audio controls>
+                        <source :src="generatedMIDI.src" type="audio/midi">
+                    </audio>
+                </div>
+            </div>
+
+            <canvas class="hidden" :width="trainingDimensions.x" :height="trainingDimensions.y" ref="canvasPreview" />
+        </div>
+
+        <div>
+            <h3 class="text-sm mt-6 mb-2">Generated Samples</h3>
 
             <div v-if="previewImages.length == 0" class="text-xs text-gray-500 mb-4">
-                No previews available. Train or click "Preview Image" to generate previews.
+                No generated samples available. Train or click "Generate Sample".
             </div>
 
             <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
