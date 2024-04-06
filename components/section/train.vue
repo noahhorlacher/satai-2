@@ -45,6 +45,7 @@ const fileInput = ref()
 const selectedSamplesName = ref()
 
 const trainedForEpochs = ref(0)
+const lastEpochSaved = ref(-1)
 
 let trainingData = []
 
@@ -56,10 +57,10 @@ const batchSizeSelection = ref(batchSize)
 
 // for generating
 // Threshold for value to be considered a note (below is 0)
-const midiConfidenceThreshold = ref(0.3)
+const midiConfidenceThreshold = ref(0.5)
 
 // Threshold difference in velocity to last x unit (same pitch) to interrupt last and start a new note
-const velocityDifferenceThreshold = ref(0.1)
+const velocityDifferenceThreshold = ref(0.001)
 
 // Assuming dimensions and startOctave are available from your preprocessing settings
 const startOctave = 3;
@@ -78,12 +79,7 @@ const generatorParamsAmount = 100
     Architecture based on:
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
-// const modelStore = useModelStore()
-// const { discriminator, generator, gan } = toRefs(useModelStore())
-
-onMounted(() => {
-    // modelStore.initialize()
-})
+const { discriminator, generator, gan } = useModel()
 
 function shouldSaveEpoch() {
     const i = trainedForEpochs.value
@@ -169,7 +165,7 @@ async function trainModel() {
             chartSeries[1].data.push(dLoss.toFixed(5))
 
             if (shouldSaveEpoch()) {
-                previewImage(true)
+                generateSample(true)
                 generateMIDI(true)
             }
 
@@ -210,9 +206,10 @@ async function getRandomSamples(n) {
         let unzippedData = await pako.ungzip(fileData)
         fileData = null
 
-
         let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
         unzippedData = null
+
+        console.log('arrays', arrays)
 
         currentLoadedSampleBatch.data = arrays
     }
@@ -231,36 +228,33 @@ function generateMIDI(training = false) {
     busy.value = true;
 
     let noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount]);
-    const generatedData = generator.predict(noise);
-    let data = generatedData.arraySync();
+    const generatedData = generator.predict(noise)
+    let data = generatedData.arraySync()
 
-    // Flatten the data and remove the unnecessary dimension
-    data = data.map(sample => sample.map(row => row.map(value => value[0])));
-
-    // Convert the data to a MIDI file
-    const midi = new Midi();
-
-    // Add a track
-    const track = midi.addTrack();
-
-    // Create notes from the generated data
     for (let sample of data) {
+        // Convert the data to a MIDI file
+        const midi = new Midi();
+
+        // Add a track
+        const track = midi.addTrack();
+
+        // Create notes from the generated data
         for (let y = 0; y < sample.length; y++) {
             let noteStartX = null;
             let lastVelocity = 0;
 
             for (let x = 0; x < sample[y].length; x++) {
-                const velocity = Math.max(0, Math.min(1, sample[y][x]));
+                const velocity = Math.max(0, Math.min(1, sample[y][x][0]));
 
-                if (velocity > midiConfidenceThreshold) {
+                if (velocity > midiConfidenceThreshold.value) {
                     // Check if the difference in velocity is large enough to start a new note
-                    if (noteStartX === null || Math.abs(velocity - lastVelocity) > velocityDifferenceThreshold) {
+                    if (noteStartX === null || Math.abs(velocity - lastVelocity) > velocityDifferenceThreshold.value) {
                         noteStartX = x; // Note onset
                         lastVelocity = velocity;
                     }
 
                     // If this is the last pixel in the row or next pixel is below the threshold, end the note
-                    if (x === sample[y].length - 1 || (Math.abs(sample[y][x + 1] - velocity) > velocityDifferenceThreshold)) {
+                    if (x === sample[y].length - 1 || (Math.abs(sample[y][x + 1] - velocity) > velocityDifferenceThreshold.value)) {
                         const midiNumber = y + (startOctave * 12);
                         const startTime = 2 * 8 * (noteStartX / trainingDimensions.x);
                         const endTime = 2 * 8 * ((x + 1) / trainingDimensions.x);
@@ -281,18 +275,19 @@ function generateMIDI(training = false) {
                 }
             }
         }
-    }
 
-    // Convert the MIDI to a blob and download
-    const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
-    downloadData(blob, `SatAi2-sample_epoch-${trainedForEpochs.value}.mid`, 'audio/midi')
+        // Convert the MIDI to a blob and download
+        const blob = new Blob([midi.toArray()], { type: 'audio/midi' });
+        downloadData(blob, `SatAi2-sample_epoch-${trainedForEpochs.value}.mid`, 'audio/midi')
+    }
 
     busy.value = false;
 }
 
+
 const canvasPreview = ref()
 const previewImages = ref([])
-function previewImage(training = false) {
+function generateSample(training = false) {
     busy.value = true
 
     const noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount])
@@ -450,6 +445,8 @@ function nextSave() {
 
 // download both models
 async function saveModel() {
+    lastEpochSaved.value = trainedForEpochs.value
+
     const discriminatorModelSaveResult = await discriminator.save(`downloads://discriminator-model-${trainedForEpochs.value}-epochs`)
     const generatorModelSaveResult = await generator.save(`downloads://generator-model-${trainedForEpochs.value}-epochs`)
     const ganModelSaveResult = await gan.save(`downloads://gan-model-${trainedForEpochs.value}-epochs`)
@@ -541,16 +538,16 @@ async function loadModel() {
 
         <div>
             <h3 class="text-sm mt-6 mb-2">Test Model</h3>
-            <el-button @click="generateMIDI" :disabled="trainingData.length <= 0 || busy">
+            <el-button @click="generateMIDI" :disabled="busy">
                 Generate MIDI
             </el-button>
-            <el-button @click="previewImage" :disabled="trainingData.length <= 0 || busy">
-                Preview Image
+            <el-button @click="generateSample" :disabled="busy">
+                Generate Sample
             </el-button>
             <el-button @click="previewSample" :disabled="trainingData.length <= 0 || busy">
                 Preview Sample
             </el-button>
-            <el-button @click="saveModel" :disabled="trainedForEpochs <= 0 || busy">
+            <el-button @click="saveModel" :disabled="trainedForEpochs > lastEpochSaved || busy">
                 Save Model
             </el-button>
         </div>
