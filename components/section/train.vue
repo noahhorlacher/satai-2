@@ -79,7 +79,7 @@ const generatorParamsAmount = 100
     Architecture based on:
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
-const { discriminator, generator, gan } = useModel()
+const { discriminator, generator, gan } = useNNModels()
 
 function shouldSaveEpoch() {
     const i = trainedForEpochs.value
@@ -103,89 +103,80 @@ function shouldSaveEpoch() {
 
 let trainingStartDateTime
 let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
+
 async function trainModel() {
-    busy.value = true
-    statusMessage.value = 'Starting training...'
+    busy.value = true;
+    statusMessage.value = 'Starting training...';
 
-    epochs = epochsSelection.value
-    batchSize = batchSizeSelection.value
+    epochs = epochsSelection.value;
+    batchSize = batchSizeSelection.value;
 
-    let backend = tf.getBackend()
-    trainingStartDateTime = new Date()
-
-    let realImagesArray
+    let backend = tf.getBackend();
+    trainingStartDateTime = new Date();
 
     for (let i = 0; i < epochs; i++) {
         try {
-            realImagesArray = await getRandomSamples(batchSize)
+            const realImagesArray = await getRandomSamples(batchSize);
 
-            // Convert each 2D image in the array to a 3D image by adding an extra dimension
-            realImagesArray = realImagesArray.map(image => {
-                return image.map(row => {
-                    return row.map(value => {
-                        return [value] // Adds an extra dimension
-                    })
-                })
-            })
+            // Wrap tensor operations in tf.tidy
+            const { realImages, noise, fakeImages, realLabels, fakeLabels, misleadingLabels } = tf.tidy(() => {
+                // Convert each 2D image in the array to a 3D image by adding an extra dimension
+                const realImages = realImagesArray.map(image => image.map(row => row.map(value => [value])));
+                const realImagesTensor = tf.tensor4d(realImages, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
+                const noise = tf.randomNormal([batchSize, generatorParamsAmount]);
+                const fakeImages = generator.predict(noise);
+                const realLabels = tf.ones([batchSize, 1]).mul(0.9);
+                const fakeLabels = tf.zeros([batchSize, 1]).mul(0.1);
+                const misleadingLabels = tf.ones([batchSize, 1]).mul(0.9);
 
-            // Convert the array to a tensor
-            let realImages = tf.tensor4d(realImagesArray, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
-
-            // Check if the conversion is correct
-            // Generate a batch of fake images.
-            const noise = tf.randomNormal([batchSize, generatorParamsAmount])
-            const fakeImages = generator.predict(noise)
-
-            // Create a batch of labels for the real and fake images.
-            // With label smoothing
-            const realLabels = tf.ones([batchSize, 1]).mul(0.9)
-            const fakeLabels = tf.zeros([batchSize, 1]).mul(0.1)
+                return { realImages: realImagesTensor, noise, fakeImages, realLabels, fakeLabels, misleadingLabels };
+            });
 
             // Train the discriminator on real and fake images
-            let dLossReal = await discriminator.trainOnBatch(realImages, realLabels)
-            let dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels)
+            const dLossReal = await discriminator.trainOnBatch(realImages, realLabels);
+            realImages.dispose();
 
-            realImages.dispose()
-            fakeImages.dispose()
-            realLabels.dispose()
-            fakeLabels.dispose()
+            const dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels);
+            const dLoss = (dLossReal + dLossFake) / 2;
 
-            const dLoss = (dLossReal + dLossFake) / 2
+            const gLoss = await gan.trainOnBatch(noise, misleadingLabels);
 
-            // Train the generator via the gan model
-            const misleadingLabels = tf.ones([batchSize, 1]).mul(0.9)
-            const gLoss = await gan.trainOnBatch(noise, misleadingLabels)
+            // Dispose tensors that are no longer needed
+            fakeImages.dispose();
+            realLabels.dispose();
+            fakeLabels.dispose();
+            misleadingLabels.dispose();
+            noise.dispose();
 
-            noise.dispose()
-            misleadingLabels.dispose()
+            // Update the status message and chart series
+            statusMessage.value = `💡 Using backend [${backend}] to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`;
 
-            statusMessage.value = `💡 Using backend [${backend}] to train\n⏲ Started training on ${trainingStartDateTime.toLocaleString()}\n🥊 Trained epoch ${i + 1} of ${epochs}.\n🎨 GAN loss: ${gLoss}\n👓 Discriminator loss: ${dLoss}`
+            chartSeries[0].data.push(gLoss.toFixed(5));
+            chartSeries[1].data.push(dLoss.toFixed(5));
 
-            chartSeries[0].data.push(gLoss.toFixed(5))
-            chartSeries[1].data.push(dLoss.toFixed(5))
-
+            // Generate sample and MIDI if needed
             if (shouldSaveEpoch()) {
-                generateSample(true)
-                generateMIDI(true)
+                generateSample(true);
+                generateMIDI(true);
             }
 
-            if (trainedForEpochs.value % 500 == 0) {
-                await saveModel()
+            // Save model periodically
+            if (trainedForEpochs.value != 0 && trainedForEpochs.value % 300 == 0) {
+                saveModel();
             }
 
-            trainedForEpochs.value++
+            trainedForEpochs.value++;
         } catch (error) {
-            console.error('Error training:', error)
-            console.log('the samples in question', realImagesArray)
-            statusMessage.value = 'Error training. Check console'
+            console.error('Error training:', error);
+            console.log('the samples in question', realImagesArray);
+            statusMessage.value = 'Error training. Check console';
         }
 
-        await tf.nextFrame() // keep ui responsive
+        await tf.nextFrame(); // Keep UI responsive
     }
 
-    busy.value = false
-
-    statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`
+    busy.value = false;
+    statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`;
 }
 
 async function getRandomSamples(n) {
@@ -208,8 +199,6 @@ async function getRandomSamples(n) {
 
         let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
         unzippedData = null
-
-        console.log('arrays', arrays)
 
         currentLoadedSampleBatch.data = arrays
     }
@@ -311,8 +300,6 @@ function generateSample(training = false) {
     ctx.clearRect(0, 0, trainingDimensions.x, trainingDimensions.y)
 
     const imageData = ctx.createImageData(trainingDimensions.x, trainingDimensions.y)
-    console.log('data', data)
-
 
     // loop over each pixel and set pixel brightness to the generated data
     for (let sample of data) {
