@@ -4,7 +4,7 @@ const chromaticInstruments = [...Array(113).keys()].filter(i => !(i === 48 || (i
 
 export default class MIDIPreprocessor {
     // Constants
-    static DEFAULT_DIMENSIONS = { x: 192, y: 64 };
+    static DEFAULT_DIMENSIONS = { x: 128, y: 64 };
     static DEFAULT_START_OCTAVE = 3;
     static DEFAULT_HORIZONTAL_RESOLUTION = 1 / 8;
     static DEFAULT_STEP_SIZE_X = 1;
@@ -26,7 +26,9 @@ export default class MIDIPreprocessor {
             allProcessedMidiMatrices = [...allProcessedMidiMatrices, ...processedMidiMatrices];
         }
 
-        return this.filterEmptyMatrices(allProcessedMidiMatrices);
+        const filteredMatrices = this.filterEmptyMatrices(allProcessedMidiMatrices)
+
+        return filteredMatrices
     }
 
     // Default options
@@ -141,9 +143,9 @@ export default class MIDIPreprocessor {
         }
     }
 
-    // Filter out matrices that do not meet the criteria
+    // Filter out undefined matrices
     static filterEmptyMatrices(matrices) {
-        return matrices.filter(matrix => matrix.some(row => row.some(val => val !== 0)));
+        return matrices.filter(matrix => matrix)
     }
 
     // Validate matrix based on minimum notes and pitch variety criteria
