@@ -106,7 +106,10 @@ let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
 
 async function trainModel() {
     busy.value = true;
-    statusMessage.value = 'Starting training...';
+    statusMessage.value = 'Starting training...'
+
+    // Keep screen from going asleep
+    const wakeLock = await navigator.wakeLock.request('screen')
 
     epochs = epochsSelection.value;
     batchSize = batchSizeSelection.value;
@@ -175,6 +178,7 @@ async function trainModel() {
         await tf.nextFrame(); // Keep UI responsive
     }
 
+    wakeLock.release()
     busy.value = false;
     statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`;
 }
