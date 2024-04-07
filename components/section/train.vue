@@ -2,6 +2,7 @@
 import * as tf from '@tensorflow/tfjs'
 import pako from 'pako'
 import { Midi } from '@tonejs/midi'
+import JSZip from 'jszip';
 
 const { statusMessage } = toRefs(useStatusMessageStore())
 
@@ -11,6 +12,10 @@ const busy = ref(false)
 
 const isTraining = ref(false)
 const isPaused = ref(false)
+
+// Refs for the file inputs
+const modelFilesInput = ref()
+
 
 // While training, reuse the same batch of samples to pick randomly from for a few epochs
 // so the amount of ungzipping is reduced
@@ -54,9 +59,11 @@ let trainingData = []
 
 let epochs = 1000
 let batchSize = 32
+let discriminatorTrainingFactor = 5
 
 const epochsSelection = ref(epochs)
 const batchSizeSelection = ref(batchSize)
+const discriminatorTrainingFactorSelection = ref(discriminatorTrainingFactor)
 
 // for generating
 // Threshold for value to be considered a note (below is 0)
@@ -82,7 +89,7 @@ const generatorParamsAmount = 100
     Architecture based on:
     https://medium.com/ee-460j-final-project/generating-music-with-a-generative-adversarial-network-8d3f68a33096
 */
-const { discriminator, generator, gan } = useNNModels()
+let { discriminator, generator, gan } = useNNModels()
 
 function shouldSaveEpoch() {
     const i = trainedForEpochs.value
@@ -122,6 +129,12 @@ async function trainModel() {
     statusMessage.value = 'Starting training...'
     isTraining.value = true
 
+    if (!discriminator || !generator || !gan) {
+        console.error("One or more models are not loaded properly. Training cannot proceed.");
+        return;
+    }
+
+
     // Keep screen from going asleep
     const wakeLock = await navigator.wakeLock.request('screen')
 
@@ -137,7 +150,7 @@ async function trainModel() {
                 await new Promise(resolve => setTimeout(resolve, 1000))
             }
 
-            const realImagesArray = await getRandomSamples(batchSize);
+            const realImagesArray = await getRandomSamples(batchSize)
 
             // Wrap tensor operations in tf.tidy
             const { realImages, noise, fakeImages, realLabels, fakeLabels, misleadingLabels } = tf.tidy(() => {
@@ -153,16 +166,21 @@ async function trainModel() {
                 return { realImages: realImagesTensor, noise, fakeImages, realLabels, fakeLabels, misleadingLabels };
             });
 
-            // Train the discriminator on real and fake images
-            const dLossReal = await discriminator.trainOnBatch(realImages, realLabels);
-            realImages.dispose();
+            let dLoss = 0
+            for(let j = 0; j < discriminatorTrainingFactorSelection.value; j++){
 
-            const dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels);
-            const dLoss = (dLossReal + dLossFake) / 2;
-
+                // Train the discriminator on real and fake images
+                const dLossReal = await discriminator.trainOnBatch(realImages, realLabels);
+                
+                const dLossFake = await discriminator.trainOnBatch(fakeImages, fakeLabels);
+                const currentDLoss = (dLossReal + dLossFake) / 2
+                dLoss += currentDLoss / discriminatorTrainingFactorSelection.value
+            }
+            
             const gLoss = await gan.trainOnBatch(noise, misleadingLabels);
-
+            
             // Dispose tensors that are no longer needed
+            realImages.dispose();
             fakeImages.dispose();
             realLabels.dispose();
             fakeLabels.dispose();
@@ -190,7 +208,7 @@ async function trainModel() {
             trainedForEpochs.value++
         } catch (error) {
             console.error('Error training:', error)
-            console.log('the samples in question', realImagesArray)
+            console.error('models:', discriminator, generator, gan)
             statusMessage.value = 'Error training. Check console'
         }
 
@@ -224,8 +242,11 @@ async function getRandomSamples(n) {
         let arrays = JSON.parse(new TextDecoder().decode(unzippedData))
         unzippedData = null
 
-        currentLoadedSampleBatch.data = arrays
+        // filter out undefined samples
+        currentLoadedSampleBatch.data = arrays.filter(sample => sample !== undefined && sample !== null)
     }
+
+    currentLoadedSampleBatch.timesLoaded++
 
     // get n random elements from trainingData
     const result = []
@@ -473,13 +494,90 @@ function nextSave() {
 async function saveModel() {
     lastEpochSaved.value = trainedForEpochs.value
 
-    await discriminator.save(`downloads://discriminator-model-${trainedForEpochs.value}-epochs`)
-    await generator.save(`downloads://generator-model-${trainedForEpochs.value}-epochs`)
-    await gan.save(`downloads://gan-model-${trainedForEpochs.value}-epochs`)
+    await discriminator.save(`downloads://discriminator-model`)
+    await generator.save(`downloads://generator-model`)
+    await gan.save(`downloads://gan-model`)
 }
 
-async function loadModel() {
-    // implement loading from localstorage or get request
+// Function to load all models
+async function loadModels(event) {
+    const files = event.target.files;
+    if (files.length === 0) {
+        console.error("No files selected.");
+        return;
+    }
+
+    // Function to find a file by partial name and extension
+    function findFileByPartialName(partialName, extension) {
+        return Array.from(files).find(file => file.name.includes(partialName) && file.name.endsWith(extension));
+    }
+
+    // Check if all required files are present
+    const requiredModels = ['discriminator', 'generator', 'gan'];
+    const requiredExtensions = ['.json', '.weights.bin'];
+    let allFilesPresent = true;
+
+    requiredModels.forEach(model => {
+        requiredExtensions.forEach(extension => {
+            if (!findFileByPartialName(model, extension)) {
+                console.error(`Missing file for ${model} with extension ${extension}`);
+                allFilesPresent = false;
+            }
+        });
+    });
+
+    if (!allFilesPresent) {
+        console.error("Not all required model files are present. Aborting model loading.");
+        return;
+    }
+
+    // Load models based on partial filenames
+    try {
+        const discriminatorJSONFile = findFileByPartialName('discriminator', '.json');
+        const discriminatorWeightsFile = findFileByPartialName('discriminator', '.weights.bin');
+        discriminator = await tf.loadLayersModel(tf.io.browserFiles([discriminatorJSONFile, discriminatorWeightsFile]));
+        console.log("Discriminator model loaded successfully.", discriminator);
+
+        const generatorJSONFile = findFileByPartialName('generator', '.json');
+        const generatorWeightsFile = findFileByPartialName('generator', '.weights.bin');
+        generator = await tf.loadLayersModel(tf.io.browserFiles([generatorJSONFile, generatorWeightsFile]));
+        console.log("Generator model loaded successfully.", generator);
+
+        const ganJSONFile = findFileByPartialName('gan', '.json');
+        const ganWeightsFile = findFileByPartialName('gan', '.weights.bin');
+        gan = await tf.loadLayersModel(tf.io.browserFiles([ganJSONFile, ganWeightsFile]));
+        console.log("GAN model loaded successfully.", gan);
+
+        // compile models
+        let defaultSettings = {
+            discriminator: {
+                learningRate: 0.0002,
+                clipValue: 0.01
+            },
+            generator: {
+                amountInputParameters: 100
+            },
+            GAN: {
+                learningRate: 0.0002,
+                clipValue: 0.01
+            }
+        }
+        // Compile the discriminator
+        discriminator.compile({
+            loss: 'binaryCrossentropy',
+            optimizer: tf.train.adam(defaultSettings.discriminator.learningRate, 0.5, 0.999),
+            clipValue: defaultSettings.discriminator.clipValue
+        })
+
+        gan.compile({
+            loss: 'binaryCrossentropy',
+            optimizer: tf.train.adam(defaultSettings.GAN.learningRate, 0.5, 0.999),
+            clipValue: defaultSettings.GAN.clipValue
+        })
+
+    } catch (error) {
+        console.error("Error loading models:", error);
+    }
 }
 </script>
 
@@ -554,6 +652,12 @@ async function loadModel() {
                 <el-input-number :disabled="isTraining || !trainingData || trainingData.length == 0 || busy"
                     v-model="batchSizeSelection" />
             </div>
+
+            <div>
+                <p class="text-xs mb-1">Train Discriminator x times each epoch</p>
+                <el-input-number :disabled="isTraining || !trainingData || trainingData.length == 0 || busy"
+                    v-model="discriminatorTrainingFactorSelection" />
+            </div>
         </div>
 
         <div>
@@ -581,9 +685,13 @@ async function loadModel() {
                 <el-button @click="previewSample" :disabled="trainingData.length <= 0 || busy">
                     Preview Sample
                 </el-button>
-                <el-button @click="saveModel" :disabled="trainedForEpochs > lastEpochSaved || busy">
+                <el-button @click="saveModel" :disabled="busy">
                     Save Model
                 </el-button>
+            </div>
+            <div>
+                <el-button @click="modelFilesInput.click()">Load the 6 Model Files</el-button>
+                <input class="hidden" type="file" ref="modelFilesInput" @change="loadModels" accept=".json, .bin" multiple />
             </div>
         </div>
 
