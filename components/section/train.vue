@@ -9,6 +9,9 @@ statusMessage.value = 'Press an action button to begin...'
 
 const busy = ref(false)
 
+const isTraining = ref(false)
+const isPaused = ref(false)
+
 // While training, reuse the same batch of samples to pick randomly from for a few epochs
 // so the amount of ungzipping is reduced
 const pickNewBatchEveryNEpochs = 50
@@ -60,7 +63,7 @@ const batchSizeSelection = ref(batchSize)
 const midiConfidenceThreshold = ref(0.5)
 
 // Threshold difference in velocity to last x unit (same pitch) to interrupt last and start a new note
-const velocityDifferenceThreshold = ref(0.001)
+const velocityDifferenceThreshold = ref(0.002)
 
 // Assuming dimensions and startOctave are available from your preprocessing settings
 const startOctave = 3;
@@ -104,9 +107,20 @@ function shouldSaveEpoch() {
 let trainingStartDateTime
 let trainingPreviewNoise = tf.randomNormal([3, generatorParamsAmount])
 
+function pauseTraining() {
+    isPaused.value = true
+    statusMessage.value = `Training paused (Epoch ${trainedForEpochs.value})`
+}
+
+function resumeTraining() {
+    isPaused.value = false
+    statusMessage.value = `Resuming training (Epoch ${trainedForEpochs.value})`
+}
+
 async function trainModel() {
     busy.value = true;
     statusMessage.value = 'Starting training...'
+    isTraining.value = true
 
     // Keep screen from going asleep
     const wakeLock = await navigator.wakeLock.request('screen')
@@ -119,6 +133,10 @@ async function trainModel() {
 
     for (let i = 0; i < epochs; i++) {
         try {
+            while (isPaused.value) {
+                await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+
             const realImagesArray = await getRandomSamples(batchSize);
 
             // Wrap tensor operations in tf.tidy
@@ -159,26 +177,28 @@ async function trainModel() {
 
             // Generate sample and MIDI if needed
             if (shouldSaveEpoch()) {
-                generateSample(true);
-                generateMIDI(true);
+                lastSavedEpoch.value = trainedForEpochs.value
+                generateSample(true)
+                generateMIDI(true)
             }
 
             // Save model periodically
             if (trainedForEpochs.value > 1 && trainedForEpochs.value % 300 == 0) {
-                saveModel();
+                saveModel()
             }
 
-            trainedForEpochs.value++;
+            trainedForEpochs.value++
         } catch (error) {
-            console.error('Error training:', error);
-            console.log('the samples in question', realImagesArray);
-            statusMessage.value = 'Error training. Check console';
+            console.error('Error training:', error)
+            console.log('the samples in question', realImagesArray)
+            statusMessage.value = 'Error training. Check console'
         }
 
         await tf.nextFrame(); // Keep UI responsive
     }
 
     wakeLock.release()
+    isTraining.value = false
     busy.value = false;
     statusMessage.value = `Training completed. ${epochs} epochs trained. GAN loss: ${chartSeries[0].data.at(-1)}. Discriminator loss: ${chartSeries[1].data.at(-1)}`;
 }
@@ -218,7 +238,7 @@ async function getRandomSamples(n) {
 }
 
 const generatedMIDIs = ref([])
-function generateMIDI(training = false) {
+async function generateMIDI(training = false) {
     busy.value = true;
 
     let noise = training ? trainingPreviewNoise : tf.randomNormal([1, generatorParamsAmount]);
@@ -270,12 +290,11 @@ function generateMIDI(training = false) {
             }
         }
 
-        // Convert the MIDI to a blob and download
+        // Convert the MIDI to a blob
         const blob = new Blob([midi.toArray()], { type: 'audio/midi' })
 
-        blobToBase64(blob).then((midiBase64) => {
-            generatedMIDIs.value.unshift({ description: `SatAi 2 MIDI, Epoch ${trainedForEpochs.value}`, src: midiBase64 })
-        })
+        const midiBase64 = await blobToBase64(blob)
+        generatedMIDIs.value.push({ description: `SatAi 2 MIDI, Epoch ${trainedForEpochs.value}`, src: midiBase64 })
     }
 
     busy.value = false;
@@ -431,8 +450,9 @@ async function newSampleFileChosen(event) {
     busy.value = false
 }
 
+const lastSavedEpoch = ref(-1)
 function nextSave() {
-    const i = trainedForEpochs.value
+    const i = lastSavedEpoch.value
 
     if (i < 100) {
         return i - (i % 10) + 10
@@ -471,8 +491,7 @@ async function loadModel() {
         </div>
         <div
             class="text-md rounded-md shadow-md bg-gray-900 text-green-400 py-2 px-4 mb-2 font-mono whitespace-pre-line">
-            {{
-                statusMessage }}
+            {{ statusMessage }}
         </div>
 
         <div>
@@ -509,8 +528,16 @@ async function loadModel() {
 
         <h3 class="text-sm mt-6 mb-2">Train</h3>
         <div class="flex flex-row gap-x-4 mb-4">
-            <el-button @click="trainModel" :disabled="!trainingData || trainingData.length == 0 || busy">
-                Train Model
+            <el-button v-if="isTraining && isPaused" @click="resumeTraining"
+                :disabled="!trainingData || trainingData.length == 0">
+                {{ 'Resume Training' }}
+            </el-button>
+            <el-button v-else-if="isTraining && !isPaused" @click="pauseTraining"
+                :disabled="!trainingData || trainingData.length == 0">
+                {{ 'Pause Training' }}
+            </el-button>
+            <el-button v-else @click="trainModel" :disabled="!trainingData || trainingData.length == 0 || busy">
+                {{ 'Start Training' }}
             </el-button>
         </div>
 
@@ -518,13 +545,13 @@ async function loadModel() {
         <div class="flex flex-row gap-x-4 mb-4">
             <div>
                 <p class="text-xs mb-1">Epochs</p>
-                <el-input-number :disabled="!trainingData || trainingData.length == 0 || busy"
+                <el-input-number :disabled="isTraining || !trainingData || trainingData.length == 0 || busy"
                     v-model="epochsSelection" />
             </div>
 
             <div>
                 <p class="text-xs mb-1">Batch Size</p>
-                <el-input-number :disabled="!trainingData || trainingData.length == 0 || busy"
+                <el-input-number :disabled="isTraining || !trainingData || trainingData.length == 0 || busy"
                     v-model="batchSizeSelection" />
             </div>
         </div>
@@ -534,28 +561,30 @@ async function loadModel() {
 
             <div>
                 <p class="text-xs mb-1">MIDI Confidence Threshold</p>
-                <el-input-number :step="0.05" v-model="midiConfidenceThreshold" />
+                <el-input-number :step="0.01" :min="0" :max="1" v-model="midiConfidenceThreshold" />
             </div>
             <div>
                 <p class="text-xs mb-1">Velocity Difference Threshold</p>
-                <el-input-number :step="0.05" v-model="velocityDifferenceThreshold" />
+                <el-input-number :step="0.01" :min="0" :max="1" v-model="velocityDifferenceThreshold" />
             </div>
         </div>
 
         <div>
             <h3 class="text-sm mt-6 mb-2">Test Model</h3>
-            <el-button @click="generateMIDI" :disabled="busy">
-                Generate MIDI
-            </el-button>
-            <el-button @click="generateSample" :disabled="busy">
-                Generate Sample
-            </el-button>
-            <el-button @click="previewSample" :disabled="trainingData.length <= 0 || busy">
-                Preview Sample
-            </el-button>
-            <el-button @click="saveModel" :disabled="trainedForEpochs > lastEpochSaved || busy">
-                Save Model
-            </el-button>
+            <div class="flex flex-row gap-4 flex-wrap">
+                <el-button @click="generateMIDI" :disabled="busy">
+                    Generate MIDI
+                </el-button>
+                <el-button @click="generateSample" :disabled="busy">
+                    Generate Sample
+                </el-button>
+                <el-button @click="previewSample" :disabled="trainingData.length <= 0 || busy">
+                    Preview Sample
+                </el-button>
+                <el-button @click="saveModel" :disabled="trainedForEpochs > lastEpochSaved || busy">
+                    Save Model
+                </el-button>
+            </div>
         </div>
 
         <div>
@@ -567,10 +596,7 @@ async function loadModel() {
 
             <div class="flex flex-row flex-wrap mt-8 gap-4 justify-center">
                 <div v-for="(generatedMIDI, index) of generatedMIDIs" :key="`midi-preview-${index}`">
-                    <p class="text-xs mb-2">{{ generatedMIDI.description }}</p>
-                    <audio controls>
-                        <source :src="generatedMIDI.src" type="audio/midi">
-                    </audio>
+                    <midi-player :src="generatedMIDI.src" :description="generatedMIDI.description" />
                 </div>
             </div>
 

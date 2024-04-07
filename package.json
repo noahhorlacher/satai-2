@@ -25,7 +25,9 @@
     "nuxt": "^3.11.1",
     "nuxt-icon": "^0.6.10",
     "pako": "^2.1.0",
+    "picoaudio": "^1.1.2",
     "pinia": "^2.1.7",
+    "soundfont-player": "^0.12.0",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0",
     "vue3-apexcharts": "^1.5.2"
