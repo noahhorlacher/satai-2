@@ -59,7 +59,7 @@ let trainingData = []
 
 let epochs = 1000
 let batchSize = 32
-let discriminatorTrainingFactor = 5
+let discriminatorTrainingFactor = 2
 
 const epochsSelection = ref(epochs)
 const batchSizeSelection = ref(batchSize)
@@ -159,8 +159,20 @@ async function trainModel() {
                 const realImagesTensor = tf.tensor4d(realImages, [batchSize, trainingDimensions.y, trainingDimensions.x, 1]);
                 const noise = tf.randomNormal([batchSize, generatorParamsAmount]);
                 const fakeImages = generator.predict(noise);
-                const realLabels = tf.ones([batchSize, 1]).mul(0.9);
-                const fakeLabels = tf.zeros([batchSize, 1]).mul(0.1);
+
+                // Labels for the discriminator
+                let realLabels
+                let fakeLabels
+                
+                // Flip the labels for the discriminator every now and then to prevent the generator from overpowering the discriminator every now and then
+                if (Math.random() < 0.05) {
+                    realLabels = tf.zeros([batchSize, 1]).mul(0.1 - (Math.random() * 0.1));
+                    fakeLabels = tf.ones([batchSize, 1]).mul(0.9 + (Math.random() * 0.1));
+                } else {
+                    realLabels = tf.ones([batchSize, 1]).mul(0.9 + (Math.random() * 0.1));
+                    fakeLabels = tf.zeros([batchSize, 1]).mul(0.1 - (Math.random() * 0.1));
+                }
+
                 const misleadingLabels = tf.ones([batchSize, 1]).mul(0.9);
 
                 return { realImages: realImagesTensor, noise, fakeImages, realLabels, fakeLabels, misleadingLabels };
