@@ -2,7 +2,7 @@
 import * as tf from '@tensorflow/tfjs'
 import pako from 'pako'
 import { Midi } from '@tonejs/midi'
-import JSZip from 'jszip';
+import JSZip from 'jszip'
 
 const { statusMessage } = toRefs(useStatusMessageStore())
 
