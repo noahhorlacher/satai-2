@@ -1,75 +1,12 @@
-# Nuxt 3 Minimal Starter
+# Install
+Pull the repo with git clone as usual, then run `npm i` in the projects root folder to install the dependencies.
 
-Look at the [Nuxt 3 documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+# Run The Frontend
+Run the frontend with `npm run dev`. It should be accessible via localhost:3000 in your browser.
 
-## Setup
+# Preprocess Data
+Create a zip file of .mid MIDI files. In the frontend, head over to preprocess. There, choose your zip file and preprocess it. The preprocessed training data will download after finishing.
 
-Make sure to install the dependencies:
-
-```bash
-# npm
-npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
-```
-
-## Development Server
-
-Start the development server on `http://localhost:3000`:
-
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm run dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm run build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm run preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+# Train
+[TO DO]
+Head over to train and choose your training data zip file.
