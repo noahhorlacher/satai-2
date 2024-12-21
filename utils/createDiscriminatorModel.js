@@ -10,18 +10,19 @@ export function createDiscriminatorModel(trainingDimensions, learningRate, clipV
         kernelSize: [3, 3],
         strides: [2, 2],
         padding: 'same',
-        activation: 'relu'
-    }));
+    }))
+
+    tf.layers.leakyReLU({ alpha: 0.2 })
 
     // Second Convolutional layer
     discriminator.add(tf.layers.conv2d({
         filters: 128,
         kernelSize: [3, 3],
         strides: [2, 2],  // Strides for downsampling
-        padding: 'same',
-        activation: 'relu',
-        alpha: 0.2
-    }));
+        padding: 'same'
+    }))
+
+    tf.layers.leakyReLU({ alpha: 0.2 })
 
     // Batch normalization to stabilize training
     discriminator.add(tf.layers.batchNormalization());
@@ -31,18 +32,19 @@ export function createDiscriminatorModel(trainingDimensions, learningRate, clipV
         filters: 256,
         kernelSize: [3, 3],
         strides: [2, 2],
-        padding: 'same',
-        activation: 'relu'
-    }));
+        padding: 'same'
+    }))
 
-    // Fourth Convolutional layer
-    // discriminator.add(tf.layers.conv2d({
-    //     filters: 512,
-    //     kernelSize: [3, 3],
-    //     strides: [2, 2],
-    //     padding: 'same',
-    //     activation: 'relu'
-    // }));
+    tf.layers.leakyReLU({ alpha: 0.2 })
+
+    discriminator.add(tf.layers.conv2d({
+        filters: 512,
+        kernelSize: [3, 3],
+        strides: [2, 2],
+        padding: 'same'
+    }))
+
+    tf.layers.leakyReLU({ alpha: 0.2 })
 
     // Flatten layer
     discriminator.add(tf.layers.flatten());
@@ -50,7 +52,7 @@ export function createDiscriminatorModel(trainingDimensions, learningRate, clipV
     // Dropout layer for regularization
     discriminator.add(tf.layers.dropout({
         rate: 0.4  // Dropout rate for regularization
-    }));
+    }))
 
     // Fully Connected Layer
     discriminator.add(tf.layers.dense({

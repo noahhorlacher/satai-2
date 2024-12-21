@@ -2,7 +2,8 @@
 import * as tf from '@tensorflow/tfjs'
 import pako from 'pako'
 import { Midi } from '@tonejs/midi'
-import JSZip from 'jszip'
+
+// tf.setBackend('cpu')
 
 const { statusMessage } = toRefs(useStatusMessageStore())
 
