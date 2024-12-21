@@ -46,19 +46,10 @@ export function createDiscriminatorModel(trainingDimensions, learningRate) {
     discriminator.add(tf.layers.batchNormalization())
     discriminator.add(tf.layers.leakyReLU({ alpha: 0.2 }))
 
-    // Flatten layer
+    // flatten and dense layer
     discriminator.add(tf.layers.flatten());
-
-    // Dropout layer for regularization
-    discriminator.add(tf.layers.dropout({
-        rate: 0.3  // Dropout rate for regularization
-    }))
-
-    // Fully Connected Layer
-    discriminator.add(tf.layers.dense({
-        units: 1,
-        activation: 'sigmoid'
-    }))
+    discriminator.add(tf.layers.dropout({ rate: 0.3 }));
+    discriminator.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
 
     // Compile the discriminator
     discriminator.compile({
