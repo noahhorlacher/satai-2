@@ -3,7 +3,7 @@ import * as tf from '@tensorflow/tfjs'
 export function createDiscriminatorModel(trainingDimensions, learningRate, clipValue) {
     const discriminator = tf.sequential()
 
-    // First Convolutional layer - Assuming a larger kernel and stride to reduce dimension significantly
+    // First Convolutional Layer
     discriminator.add(tf.layers.conv2d({
         inputShape: [trainingDimensions.y, trainingDimensions.x, 1],
         filters: 64,
@@ -14,7 +14,7 @@ export function createDiscriminatorModel(trainingDimensions, learningRate, clipV
 
     tf.layers.leakyReLU({ alpha: 0.2 })
 
-    // Second Convolutional layer
+    // Second Convolutional Layer
     discriminator.add(tf.layers.conv2d({
         filters: 128,
         kernelSize: [3, 3],
@@ -27,7 +27,7 @@ export function createDiscriminatorModel(trainingDimensions, learningRate, clipV
     // Batch normalization to stabilize training
     discriminator.add(tf.layers.batchNormalization());
 
-    // Third Convolutional layer
+    // Third Convolutional Layer
     discriminator.add(tf.layers.conv2d({
         filters: 256,
         kernelSize: [3, 3],
@@ -37,14 +37,15 @@ export function createDiscriminatorModel(trainingDimensions, learningRate, clipV
 
     tf.layers.leakyReLU({ alpha: 0.2 })
 
-    discriminator.add(tf.layers.conv2d({
-        filters: 512,
-        kernelSize: [3, 3],
-        strides: [2, 2],
-        padding: 'same'
-    }))
+    // Fourth Convolutional Layer
+    // discriminator.add(tf.layers.conv2d({
+    //     filters: 512,
+    //     kernelSize: [3, 3],
+    //     strides: [2, 2],
+    //     padding: 'same'
+    // }))
 
-    tf.layers.leakyReLU({ alpha: 0.2 })
+    // tf.layers.leakyReLU({ alpha: 0.2 })
 
     // Flatten layer
     discriminator.add(tf.layers.flatten());

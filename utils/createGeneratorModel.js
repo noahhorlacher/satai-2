@@ -8,22 +8,22 @@ export function createGeneratorModel(trainingDimensions, amountInputParameters) 
         inputShape: [amountInputParameters],
         units: 512, // Increased units for more capacity
         useBias: false
-    }));
-    generator.add(tf.layers.batchNormalization());
-    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
+    }))
+    generator.add(tf.layers.batchNormalization())
+    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }))
 
     // Adding another dense layer to expand
     generator.add(tf.layers.dense({
         units: 1 * (trainingDimensions.y / 8) * (trainingDimensions.x / 8), // Increased units for subsequent reshape
         useBias: false
-    }));
-    generator.add(tf.layers.batchNormalization());
-    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
+    }))
+    generator.add(tf.layers.batchNormalization())
+    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }))
 
     // Reshape to a 3D volume
     generator.add(tf.layers.reshape({
         targetShape: [trainingDimensions.y / 8, trainingDimensions.x / 8, 1] // Increased depth for richer feature representation
-    }));
+    }))
 
     // Use Conv2DTranspose to upscale the image dimensions while reducing depth
     // First Conv2DTranspose layer
@@ -34,9 +34,9 @@ export function createGeneratorModel(trainingDimensions, amountInputParameters) 
         strides: 2,
         padding: 'same',
         useBias: false
-    }));
-    generator.add(tf.layers.batchNormalization());
-    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
+    }))
+    generator.add(tf.layers.batchNormalization())
+    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }))
 
     // Second Conv2DTranspose layer
     generator.add(tf.layers.conv2dTranspose({
@@ -45,9 +45,9 @@ export function createGeneratorModel(trainingDimensions, amountInputParameters) 
         strides: 2,
         padding: 'same',
         useBias: false
-    }));
-    generator.add(tf.layers.batchNormalization());
-    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }));
+    }))
+    generator.add(tf.layers.batchNormalization())
+    generator.add(tf.layers.leakyReLU({ alpha: 0.2 }))
 
     // Third Conv2DTranspose layer to reach the final size
     generator.add(tf.layers.conv2dTranspose({
@@ -55,7 +55,7 @@ export function createGeneratorModel(trainingDimensions, amountInputParameters) 
         kernelSize: 5,
         strides: 2,
         padding: 'same',
-        activation: 'sigmoid'
+        activation: 'tanh'
     }));
 
     return generator
