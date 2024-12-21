@@ -68,7 +68,7 @@ const discriminatorTrainingFactorSelection = ref(discriminatorTrainingFactor)
 
 // for generating
 // Threshold for value to be considered a note (below is 0)
-const midiConfidenceThreshold = ref(0.5)
+const midiConfidenceThreshold = ref(0.01)
 
 // Threshold difference in velocity to last x unit (same pitch) to interrupt last and start a new note
 const velocityDifferenceThreshold = ref(0.002)

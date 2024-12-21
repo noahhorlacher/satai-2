@@ -5,7 +5,6 @@ export function useNNModels(settings = {
     },
     discriminator: {
         learningRate: 0.0002,
-        clipValue: 0.01
     },
     generator: {
         amountInputParameters: 100
@@ -15,7 +14,7 @@ export function useNNModels(settings = {
         clipValue: 0.01
     }
 }) {
-    const discriminator = createDiscriminatorModel(settings.outputDimensions, settings.discriminator.learningRate, settings.discriminator.clipValue)
+    const discriminator = createDiscriminatorModel(settings.outputDimensions, settings.discriminator.learningRate)
     const generator = createGeneratorModel(settings.outputDimensions, settings.generator.amountInputParameters)
     const gan = createGANModel(generator, discriminator, settings.GAN.learningRate, settings.GAN.clipValue)
 

@@ -56,7 +56,8 @@ export function createGeneratorModel(trainingDimensions, amountInputParameters) 
         strides: 2,
         padding: 'same',
         activation: 'tanh'
-    }));
+    }))
+    generator.add(tf.layers.batchNormalization())
 
     return generator
 }
