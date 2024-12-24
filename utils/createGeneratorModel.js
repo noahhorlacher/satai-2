@@ -55,7 +55,7 @@ export function createGeneratorModel(trainingDimensions, amountInputParameters) 
         kernelSize: 5,
         strides: 2,
         padding: 'same',
-        activation: 'tanh'
+        activation: 'sigmoid'
     }))
     generator.add(tf.layers.batchNormalization())
 
