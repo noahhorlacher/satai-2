@@ -54,7 +54,7 @@ export function createDiscriminatorModel(trainingDimensions, learningRate) {
 
     // Compile the discriminator
     discriminator.compile({
-        loss: (yTrue, yPred) => tf.mean(tf.mul(yTrue, yPred)), // Wasserstein loss
+        loss: 'binaryCrossentropy', // Wasserstein loss
         optimizer: tf.train.adam(learningRate, 0.5, 0.999),
     })
 
